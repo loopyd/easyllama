@@ -1,104 +1,79 @@
-# easyllama
+# easy llama(cpp)
 
-Minimal, GPU-focused llama.cpp runner with Docker + CUDA 13.1 and LLAMACPP_-prefixed config overrides.
+Minimal, GPU-focused llama.cpp runner for NVIDIA systems.
 
-## Features
+## Overview
 
-- CUDA 13.1 llama.cpp image build and server run flow
-- Configurable llama.cpp source repo/ref (upstream or custom forks)
-- Host GPU architecture auto-detection for CMAKE_CUDA_ARCHITECTURES
-- JSON configuration with strict precedence and LLAMACPP_ env overrides
-- Runtime cache-type compatibility checks before container start
-- Secure public-repo defaults with tracked config template
-- Pre-commit secret guard hook
+| Feature | Summary |
+| --- | --- |
+| Runtime | Docker + NVIDIA runtime + llama-server |
+| Build source | Any llama.cpp repo/ref (upstream or fork) |
+| Config model | JSON + LLAMACPP_ env overrides |
+| Startup safety | Cache-type compatibility check before start |
+| Target use | Local Containerized GPU inference with reproducible shell workflow |
 
 ## Requirements
 
-- Docker with NVIDIA runtime enabled
-- NVIDIA driver + working nvidia-smi on host
-- jq
-- Optional: gh (for GitHub repo creation/push workflow)
+| Dependency | Required | Notes |
+| --- | --- | --- |
+| Docker | Yes | Docker daemon must be running |
+| NVIDIA container runtime | Yes | Must be available in Docker runtimes |
+| NVIDIA driver + nvidia-smi | Yes | Used for GPU architecture detection |
+| jq | Yes | Used for JSON config parsing |
+| gh | No | Optional for GitHub workflow convenience |
+
+## Commands
+
+| Command | Description |
+| --- | --- |
+| ./run.sh build | Build local CUDA image from Dockerfile |
+| ./run.sh start | Start llama-server container |
+| ./run.sh stop | Stop and remove container |
+| ./run.sh restart | Stop then start |
+| ./run.sh status | Show container state |
+| ./run.sh logs | Follow container logs |
+| ./run.sh clean | Remove container and local image |
 
 ## Quick Start
 
-1. Build image:
+1. Build image.
 
 ```bash
 ./run.sh build
 ```
 
-2. Start server:
+2. Start server.
 
 ```bash
 ./run.sh start
 ```
 
-3. Check status:
+3. Verify status and health.
 
 ```bash
 ./run.sh status
 curl -sS http://127.0.0.1:8080/health
 ```
 
-## TurboQuant / turbo kernels
-
-If you want `turbo2`, `turbo3`, or `turbo4` KV cache type kernels, use a turbo-capable llama.cpp fork in nested config:
-
-```json
-{
-	"build": {
-		"llama_cpp_repo": "https://github.com/TheTom/llama-cpp-turboquant.git",
-		"llama_cpp_ref": "feature/turboquant-kv-cache"
-	},
-	"inference": {
-		"cache_type_v": "turbo2",
-		"kv_unified": true,
-		"cache_idle_slots": true
-	}
-}
-```
-
-Then rebuild:
-
-```bash
-./run.sh build
-./run.sh restart
-```
-
-The script validates that the built image actually supports the selected cache type and fails early with a rebuild hint if not.
-
 ## Configuration
 
-Configuration precedence:
+### Precedence
 
-1. LLAMACPP_* environment variables
-2. LLAMACPP_CONFIG_FILE path (if set)
-3. config.json (local, gitignored)
-4. config.json.example (tracked template)
-5. Built-in defaults
+| Priority | Source |
+| --- | --- |
+| 1 | LLAMACPP_ environment variables |
+| 2 | LLAMACPP_CONFIG_FILE path (if set) |
+| 3 | config.json |
+| 4 | config.json.example |
+| 5 | Built-in defaults in run.sh |
 
-Copy template to local config when you need local overrides:
+### Local Config Setup
 
 ```bash
 cp config.json.example config.json
 ```
 
-Config is node-based for clarity. Top-level nodes:
-
-- `container`
-- `network`
-- `logging`
-- `locale`
-- `build`
-- `model`
-- `inference`
-- `reasoning`
-
-Example path keys used by the script include:
-
-- `build.llama_cpp_repo`
-- `inference.cache_type_v`
-- `reasoning.enable`
+Config keys are optional. If a key is missing (or null for optional numeric keys), run.sh falls back to built-in defaults.
 
 Example env override:
 
@@ -106,7 +81,7 @@ Example env override:
 LLAMACPP_HOST_PORT=8090 LLAMACPP_ENABLE_REASONING=off ./run.sh restart
 ```
 
-Change llama.cpp fork/ref from env:
+Example fork override:
 
 ```bash
 LLAMACPP_LLAMA_CPP_REPO=https://github.com/TheTom/llama-cpp-turboquant.git \
@@ -114,31 +89,104 @@ LLAMACPP_LLAMA_CPP_REF=feature/turboquant-kv-cache \
 ./run.sh build
 ```
 
-## CLI Coverage
+## TurboQuant Notes
 
-The script provides first-class config fields for core llama.cpp and commonly used TurboQuant options (including `cache_type_v`, `kv_unified`, and `cache_idle_slots`).
+Use a turbo-capable fork if you want turbo2, turbo3, or turbo4 KV V-cache types.
 
-For any fork-specific or newly-added CLI args not modeled yet, use `inference.extra_server_args`.
+```json
+{
+    "build": {
+        "llama_cpp_repo": "https://github.com/TheTom/llama-cpp-turboquant.git",
+        "llama_cpp_ref": "feature/turboquant-kv-cache"
+    },
+    "inference": {
+        "cache_type_v": "turbo4",
+        "kv_unified": true,
+        "cache_idle_slots": true
+    }
+}
+```
+
+Then rebuild and restart:
+
+```bash
+./run.sh build
+./run.sh restart
+```
+
+The script checks whether your built image supports the selected cache_type_v and fails early with a clear hint if not.
+
+## First-Class Inference Fields
+
+### Sampling and Repetition
+
+| Config key | llama-server flag | Description | Default |
+| --- | --- | --- | --- |
+| temp | --temp | Base randomness of token selection. | 0.80 |
+| dynatemp_range | --dynatemp-range | Dynamic temperature range around temp. | 0.00 |
+| dynatemp_exp | --dynatemp-exp | Curvature of dynamic temperature adjustment. | 1.00 |
+| top_k | --top-k | Keep only top-k candidate tokens. | 40 |
+| top_p | --top-p | Keep tokens within cumulative probability p. | 0.95 |
+| min_p | --min-p | Drop low-probability tokens relative to top token. | 0.05 |
+| top_n_sigma | --top-n-sigma | Entropy-aware filtering by log-probability distance. | -1.00 |
+| typical_p | --typical-p | Locally typical sampling threshold. | 1.00 |
+| xtc_probability | --xtc-probability | Chance that XTC token cutting is applied. | 0.00 |
+| xtc_threshold | --xtc-threshold | Probability threshold used by XTC cutting. | 0.10 |
+| repeat_last_n | --repeat-last-n | Context window used for repetition penalties. | 64 |
+| repeat_penalty | --repeat-penalty | Penalize repeated token sequences. | 1.00 |
+| presence_penalty | --presence-penalty | Penalize tokens that already appeared. | 0.00 |
+| frequency_penalty | --frequency-penalty | Penalize tokens by repeat frequency. | 0.00 |
+| dry_multiplier | --dry-multiplier | DRY anti-repetition penalty strength. | 0.00 |
+| dry_base | --dry-base | DRY penalty exponential base value. | 1.75 |
+| dry_allowed_length | --dry-allowed-length | Allowed repeated length before DRY penalties grow. | 2 |
+| dry_penalty_last_n | --dry-penalty-last-n | Token window scanned by DRY repetition logic. | -1 |
+| sampler_seq | --sampler-seq | Simplified sampler ordering string. | edskypmxt |
+| samplers | --samplers | Explicit sampler chain in order. | unset (llama default) |
+| backend_sampling | --backend-sampling | Run supported samplers on accelerator backend. | false |
+
+Note: set only one of sampler_seq or samplers.
+
+### Runtime and Behavior
+
+| Config key | llama-server flag | Description | Default |
+| --- | --- | --- | --- |
+| n_predict | --n-predict | Max generated tokens per response. | -1 |
+| ctx_size | --ctx-size | Context window size (0 uses model default). | 0 |
+| batch_size | --batch-size | Logical max token batch size. | 2048 |
+| ubatch_size | --ubatch-size | Physical micro-batch size for compute. | 512 |
+| parallel | --parallel | Number of server slots/parallel sequences. | -1 |
+| n_cpu_moe | --n-cpu-moe | Keep first N MoE layers on CPU. | unset |
+| fit | --fit | Auto-adjust unset params to fit VRAM. | on |
+| flash_attn | --flash-attn | Flash attention mode on/off/auto. | auto |
+| cache_type_k | --cache-type-k | KV cache precision/quant type for K. | f16 |
+| cache_type_v | --cache-type-v | KV cache precision/quant type for V. | f16 |
+| kv_unified | --kv-unified / --no-kv-unified | Shared unified KV cache across sequences. | true |
+| cache_idle_slots | --cache-idle-slots / --no-cache-idle-slots | Save and clear idle slots on new tasks. | true |
+| web_ui | --webui / --no-webui | Enable or disable built-in web UI. | true |
+| jinja | --jinja / --no-jinja | Enable or disable Jinja chat templating. | true |
+| no_mmap | --no-mmap | Disable memory-mapped model loading. | false |
+| poll | --poll | Polling level used to wait for work. | 50 |
+| chat_template_kwargs | --chat-template-kwargs | Extra JSON args for template parser. | unset |
 
 ## Extra Server Args
 
-You can pass raw extra llama-server args via LLAMACPP_EXTRA_SERVER_ARGS or `inference.extra_server_args`.
+Use inference.extra_server_args (or LLAMACPP_EXTRA_SERVER_ARGS) for any new or fork-only flags not yet modeled.
 
-Accepted forms:
+Accepted formats:
 
-- shell words string: --foo bar --baz
-- JSON array: `["--foo","bar","--baz"]`
+| Format | Example |
+| --- | --- |
+| Shell words string | --foo bar --baz |
+| JSON array | ["--foo", "bar", "--baz"] |
 
-## Git Hooks (Secret Blocking)
-
-Install repo hooks path:
+## Git Hook
 
 ```bash
 git config core.hooksPath .githooks
 chmod +x .githooks/pre-commit
 ```
 
-The pre-commit hook blocks commits when staged changes match common secret patterns.
+The pre-commit hook blocks common secret patterns in staged content.
 
 ## License
 

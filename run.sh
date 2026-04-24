@@ -58,7 +58,7 @@ ok() { log OK "$*"; }
 err() { log ERROR "$*"; }
 die() { err "$*"; exit 1; }
 
-require_commands() {
+need_cmds() {
   local -a missing=()
   local dep
   for dep in "$@"; do
@@ -70,7 +70,7 @@ require_commands() {
   fi
 }
 
-detect_host_timezone() {
+detect_tz() {
   [[ -n "${TZ:-}" ]] && { echo "${TZ}"; return; }
   [[ -r /etc/timezone ]] && { tr -d '\n' < /etc/timezone; return; }
   if command -v timedatectl >/dev/null 2>&1; then
@@ -90,22 +90,14 @@ is_truthy() {
   esac
 }
 
-to_on_off() {
-  if is_truthy "${1}"; then
-    printf '%s' "on"
-  else
-    printf '%s' "off"
-  fi
-}
-
-config_has_path() {
+cfg_has() {
   local path="${1}"
   jq -e --arg path "${path}" '
     getpath($path | split(".")) != null
   ' "${CONFIG_FILE}" >/dev/null 2>&1
 }
 
-config_get_path() {
+cfg_get() {
   local path="${1}"
   jq -r --arg path "${path}" '
     getpath($path | split(".")) as $v |
@@ -123,24 +115,22 @@ config_get_path() {
   ' "${CONFIG_FILE}" 2>/dev/null
 }
 
-resolve_config_value() {
-  local env_name="${1}"
-  local config_path="${2}"
-  local default_value="${3}"
+cfg_set() {
+  local var_name="${1}"
+  local env_name="${2}"
+  local config_path="${3}"
+  local default_value="${4-}"
+  local value=""
 
   if [[ -n "${!env_name+x}" ]]; then
-    printf '%s' "${!env_name}"
-    return
+    value="${!env_name}"
+  elif [[ "${CONFIG_LOADED}" == "1" ]] && cfg_has "${config_path}"; then
+    value="$(cfg_get "${config_path}")"
+  else
+    value="${default_value}"
   fi
 
-  local config_value=""
-  if [[ "${CONFIG_LOADED}" == "1" ]] && config_has_path "${config_path}"; then
-    config_value="$(config_get_path "${config_path}")"
-    printf '%s' "${config_value}"
-    return
-  fi
-
-  printf '%s' "${default_value}"
+  printf -v "${var_name}" '%s' "${value}"
 }
 
 parse_extra_server_args_value() {
@@ -150,7 +140,7 @@ parse_extra_server_args_value() {
   [[ -z "${raw_value}" ]] && return
 
   if [[ "${raw_value}" =~ ^[[:space:]]*\[ ]]; then
-    require_commands jq
+    need_cmds jq
     mapfile -t EXTRA_SERVER_ARGS < <(
       printf '%s' "${raw_value}" | jq -r '
         if type == "array" then
@@ -168,7 +158,7 @@ parse_extra_server_args_value() {
   EXTRA_SERVER_ARGS=("${split_args[@]}")
 }
 
-load_extra_server_args() {
+load_extra_args() {
   EXTRA_SERVER_ARGS=()
 
   if [[ -n "${LLAMACPP_EXTRA_SERVER_ARGS+x}" ]]; then
@@ -176,11 +166,11 @@ load_extra_server_args() {
     return
   fi
 
-  if [[ "${CONFIG_LOADED}" != "1" ]] || ! config_has_path inference.extra_server_args; then
+  if [[ "${CONFIG_LOADED}" != "1" ]] || ! cfg_has inference.extra_server_args; then
     return
   fi
 
-  require_commands jq
+  need_cmds jq
   local cfg_type
   cfg_type="$(jq -r '.inference.extra_server_args | type' "${CONFIG_FILE}" 2>/dev/null || true)"
   case "${cfg_type}" in
@@ -196,12 +186,35 @@ load_extra_server_args() {
   esac
 }
 
-resolve_project_path() {
+abs_path() {
   local path_value="${1}"
   if [[ "${path_value}" = /* ]]; then
     printf '%s' "${path_value}"
   else
     printf '%s' "${SCRIPT_DIR}/${path_value}"
+  fi
+}
+
+arg_add() {
+  local -n args_ref="${1}"
+  local flag="${2}"
+  local value="${3-}"
+  [[ -n "${value}" ]] || return 0
+  args_ref+=("${flag}" "${value}")
+}
+
+arg_bool() {
+  local -n args_ref="${1}"
+  local value="${2-}"
+  local on_flag="${3}"
+  local off_flag="${4-}"
+
+  [[ -n "${value}" ]] || return 0
+
+  if is_truthy "${value}"; then
+    args_ref+=("${on_flag}")
+  elif [[ -n "${off_flag}" ]]; then
+    args_ref+=("${off_flag}")
   fi
 }
 
@@ -219,80 +232,87 @@ load_config() {
     fi
   fi
 
-  require_commands jq
+  need_cmds jq
   jq empty "${CONFIG_FILE}" >/dev/null 2>&1 || die "invalid JSON config: ${CONFIG_FILE}"
   CONFIG_LOADED=1
   info "loaded config from ${CONFIG_FILE}"
 }
 
-assign_config_value() {
-  local var_name="${1}"
-  local env_name="${2}"
-  local config_path="${3}"
-  local default_value="${4}"
-  local resolved
-  resolved="$(resolve_config_value "${env_name}" "${config_path}" "${default_value}")"
-  printf -v "${var_name}" '%s' "${resolved}"
-}
-
-load_settings() {
+load_cfg() {
   local host_tz_default
   local host_lang_default="${LANG:-C.UTF-8}"
   local reasoning_format_default="${LLAMACPP_REASONING_PARSER:-auto}"
-  host_tz_default="$(detect_host_timezone)"
+  host_tz_default="$(detect_tz)"
 
-  assign_config_value IMAGE_NAME LLAMACPP_IMAGE_NAME container.image_name 'llamacpp-local:cuda13'
-  assign_config_value CONTAINER_NAME LLAMACPP_CONTAINER_NAME container.container_name 'llamacpp-server'
-  assign_config_value MODELS_DIR LLAMACPP_MODELS_DIR container.models_dir 'models'
-  MODELS_DIR="$(resolve_project_path "${MODELS_DIR}")"
+  cfg_set IMAGE_NAME LLAMACPP_IMAGE_NAME container.image_name 'llamacpp-local:cuda13'
+  cfg_set CONTAINER_NAME LLAMACPP_CONTAINER_NAME container.container_name 'llamacpp-server'
+  cfg_set MODELS_DIR LLAMACPP_MODELS_DIR container.models_dir 'models'
+  MODELS_DIR="$(abs_path "${MODELS_DIR}")"
 
-  assign_config_value HOST_PORT LLAMACPP_HOST_PORT network.host_port '8080'
-  assign_config_value CONTAINER_PORT LLAMACPP_CONTAINER_PORT network.container_port '8080'
+  cfg_set HOST_PORT LLAMACPP_HOST_PORT network.host_port '8080'
+  cfg_set CONTAINER_PORT LLAMACPP_CONTAINER_PORT network.container_port '8080'
 
-  assign_config_value LOG_LEVEL LLAMACPP_LOG_LEVEL logging.log_level 'info'
-  assign_config_value NO_COLOR LLAMACPP_NO_COLOR logging.no_color ''
+  cfg_set LOG_LEVEL LLAMACPP_LOG_LEVEL logging.log_level 'info'
+  cfg_set NO_COLOR LLAMACPP_NO_COLOR logging.no_color ''
 
-  assign_config_value HOST_TZ LLAMACPP_HOST_TZ locale.host_tz "${host_tz_default}"
-  assign_config_value HOST_LANG LLAMACPP_HOST_LANG locale.host_lang "${host_lang_default}"
-  assign_config_value HOST_LC_ALL LLAMACPP_HOST_LC_ALL locale.host_lc_all "${LC_ALL:-${HOST_LANG}}"
+  cfg_set HOST_TZ LLAMACPP_HOST_TZ locale.host_tz "${host_tz_default}"
+  cfg_set HOST_LANG LLAMACPP_HOST_LANG locale.host_lang "${host_lang_default}"
+  cfg_set HOST_LC_ALL LLAMACPP_HOST_LC_ALL locale.host_lc_all "${LC_ALL:-${HOST_LANG}}"
 
-  assign_config_value DEFAULT_CUDA_ARCHITECTURES LLAMACPP_DEFAULT_CUDA_ARCHITECTURES build.default_cuda_architectures '120'
-  assign_config_value CMAKE_CUDA_ARCHITECTURES LLAMACPP_CMAKE_CUDA_ARCHITECTURES build.cmake_cuda_architectures 'auto'
-  assign_config_value LLAMA_CPP_REPO LLAMACPP_LLAMA_CPP_REPO build.llama_cpp_repo 'https://github.com/ggml-org/llama.cpp.git'
-  assign_config_value LLAMA_CPP_REF LLAMACPP_LLAMA_CPP_REF build.llama_cpp_ref 'master'
+  cfg_set DEFAULT_CUDA_ARCHITECTURES LLAMACPP_DEFAULT_CUDA_ARCHITECTURES build.default_cuda_architectures '120'
+  cfg_set CMAKE_CUDA_ARCHITECTURES LLAMACPP_CMAKE_CUDA_ARCHITECTURES build.cmake_cuda_architectures 'auto'
+  cfg_set LLAMA_CPP_REPO LLAMACPP_LLAMA_CPP_REPO build.llama_cpp_repo 'https://github.com/ggml-org/llama.cpp.git'
+  cfg_set LLAMA_CPP_REF LLAMACPP_LLAMA_CPP_REF build.llama_cpp_ref 'master'
 
-  assign_config_value HF_MODEL LLAMACPP_HF_MODEL model.hf_model 'mradermacher/Qwen3.6-35B-A3B-abliterated-MAX-i1-GGUF:i1-Q6_K'
-  assign_config_value HF_TOKEN LLAMACPP_HF_TOKEN model.hf_token ''
-  assign_config_value SERVER_HOST LLAMACPP_SERVER_HOST network.server_host '0.0.0.0'
+  cfg_set HF_MODEL LLAMACPP_HF_MODEL model.hf_model 'mradermacher/Qwen3.6-35B-A3B-abliterated-MAX-i1-GGUF:i1-Q6_K'
+  cfg_set HF_TOKEN LLAMACPP_HF_TOKEN model.hf_token ''
+  cfg_set SERVER_HOST LLAMACPP_SERVER_HOST network.server_host '0.0.0.0'
 
-  assign_config_value CTX_SIZE LLAMACPP_CTX_SIZE inference.ctx_size '125000'
-  assign_config_value TEMP LLAMACPP_TEMP inference.temp '0.6'
-  assign_config_value TOP_P LLAMACPP_TOP_P inference.top_p '0.95'
-  assign_config_value TOP_K LLAMACPP_TOP_K inference.top_k '20'
-  assign_config_value MIN_P LLAMACPP_MIN_P inference.min_p '0.01'
-  assign_config_value REPEAT_PENALTY LLAMACPP_REPEAT_PENALTY inference.repeat_penalty '1.05'
-  assign_config_value PRESENCE_PENALTY LLAMACPP_PRESENCE_PENALTY inference.presence_penalty '0.00'
-  assign_config_value BATCH_SIZE LLAMACPP_BATCH_SIZE inference.batch_size '2048'
-  assign_config_value UBATCH_SIZE LLAMACPP_UBATCH_SIZE inference.ubatch_size '512'
-  assign_config_value PARALLEL LLAMACPP_PARALLEL inference.parallel '1'
-  assign_config_value N_CPU_MOE LLAMACPP_N_CPU_MOE inference.n_cpu_moe '2'
-  assign_config_value FIT LLAMACPP_FIT inference.fit 'on'
-  assign_config_value FLASH_ATTN LLAMACPP_FLASH_ATTN inference.flash_attn 'on'
-  assign_config_value CACHE_TYPE_K LLAMACPP_CACHE_TYPE_K inference.cache_type_k 'q8_0'
-  assign_config_value CACHE_TYPE_V LLAMACPP_CACHE_TYPE_V inference.cache_type_v 'q8_0'
-  assign_config_value KV_UNIFIED LLAMACPP_KV_UNIFIED inference.kv_unified '0'
-  assign_config_value CACHE_IDLE_SLOTS LLAMACPP_CACHE_IDLE_SLOTS inference.cache_idle_slots '0'
-  assign_config_value NO_MMAP LLAMACPP_NO_MMAP inference.no_mmap '1'
-  assign_config_value POLL LLAMACPP_POLL inference.poll '1'
-  assign_config_value JINJA LLAMACPP_JINJA inference.jinja '1'
-  assign_config_value CHAT_TEMPLATE_KWARGS LLAMACPP_CHAT_TEMPLATE_KWARGS inference.chat_template_kwargs '{"preserve_thinking":false}'
+  cfg_set CTX_SIZE LLAMACPP_CTX_SIZE inference.ctx_size '0'
+  cfg_set N_PREDICT LLAMACPP_N_PREDICT inference.n_predict '-1'
+  cfg_set TEMP LLAMACPP_TEMP inference.temp '0.80'
+  cfg_set DYNATEMP_RANGE LLAMACPP_DYNATEMP_RANGE inference.dynatemp_range '0.00'
+  cfg_set DYNATEMP_EXP LLAMACPP_DYNATEMP_EXP inference.dynatemp_exp '1.00'
+  cfg_set TOP_P LLAMACPP_TOP_P inference.top_p '0.95'
+  cfg_set TOP_K LLAMACPP_TOP_K inference.top_k '40'
+  cfg_set MIN_P LLAMACPP_MIN_P inference.min_p '0.05'
+  cfg_set TOP_N_SIGMA LLAMACPP_TOP_N_SIGMA inference.top_n_sigma '-1.00'
+  cfg_set XTC_PROBABILITY LLAMACPP_XTC_PROBABILITY inference.xtc_probability '0.00'
+  cfg_set XTC_THRESHOLD LLAMACPP_XTC_THRESHOLD inference.xtc_threshold '0.10'
+  cfg_set TYPICAL_P LLAMACPP_TYPICAL_P inference.typical_p '1.00'
+  cfg_set SAMPLERS LLAMACPP_SAMPLERS inference.samplers ''
+  cfg_set SAMPLER_SEQ LLAMACPP_SAMPLER_SEQ inference.sampler_seq 'edskypmxt'
+  cfg_set REPEAT_LAST_N LLAMACPP_REPEAT_LAST_N inference.repeat_last_n '64'
+  cfg_set REPEAT_PENALTY LLAMACPP_REPEAT_PENALTY inference.repeat_penalty '1.00'
+  cfg_set PRESENCE_PENALTY LLAMACPP_PRESENCE_PENALTY inference.presence_penalty '0.00'
+  cfg_set FREQUENCY_PENALTY LLAMACPP_FREQUENCY_PENALTY inference.frequency_penalty '0.00'
+  cfg_set DRY_MULTIPLIER LLAMACPP_DRY_MULTIPLIER inference.dry_multiplier '0.00'
+  cfg_set DRY_BASE LLAMACPP_DRY_BASE inference.dry_base '1.75'
+  cfg_set DRY_ALLOWED_LENGTH LLAMACPP_DRY_ALLOWED_LENGTH inference.dry_allowed_length '2'
+  cfg_set DRY_PENALTY_LAST_N LLAMACPP_DRY_PENALTY_LAST_N inference.dry_penalty_last_n '-1'
+  cfg_set BATCH_SIZE LLAMACPP_BATCH_SIZE inference.batch_size '2048'
+  cfg_set UBATCH_SIZE LLAMACPP_UBATCH_SIZE inference.ubatch_size '512'
+  cfg_set PARALLEL LLAMACPP_PARALLEL inference.parallel '-1'
+  cfg_set N_CPU_MOE LLAMACPP_N_CPU_MOE inference.n_cpu_moe ''
+  cfg_set FIT LLAMACPP_FIT inference.fit 'on'
+  cfg_set FLASH_ATTN LLAMACPP_FLASH_ATTN inference.flash_attn 'auto'
+  cfg_set CACHE_TYPE_K LLAMACPP_CACHE_TYPE_K inference.cache_type_k 'f16'
+  cfg_set CACHE_TYPE_V LLAMACPP_CACHE_TYPE_V inference.cache_type_v 'f16'
+  cfg_set KV_UNIFIED LLAMACPP_KV_UNIFIED inference.kv_unified '1'
+  cfg_set CACHE_IDLE_SLOTS LLAMACPP_CACHE_IDLE_SLOTS inference.cache_idle_slots '1'
+  cfg_set BACKEND_SAMPLING LLAMACPP_BACKEND_SAMPLING inference.backend_sampling '0'
+  cfg_set WEB_UI LLAMACPP_WEB_UI inference.web_ui '1'
+  cfg_set NO_MMAP LLAMACPP_NO_MMAP inference.no_mmap '0'
+  cfg_set POLL LLAMACPP_POLL inference.poll '50'
+  cfg_set JINJA LLAMACPP_JINJA inference.jinja '1'
+  cfg_set CHAT_TEMPLATE_KWARGS LLAMACPP_CHAT_TEMPLATE_KWARGS inference.chat_template_kwargs ''
 
-  assign_config_value ENABLE_REASONING LLAMACPP_ENABLE_REASONING reasoning.enable 'off'
-  assign_config_value REASONING_FORMAT LLAMACPP_REASONING_FORMAT reasoning.format "${reasoning_format_default}"
-  assign_config_value REASONING_BUDGET LLAMACPP_REASONING_BUDGET reasoning.budget '256'
-  assign_config_value REASONING_BUDGET_MESSAGE LLAMACPP_REASONING_BUDGET_MESSAGE reasoning.budget_message 'Answer directly and avoid long hidden reasoning loops.'
+  cfg_set ENABLE_REASONING LLAMACPP_ENABLE_REASONING reasoning.enable 'auto'
+  cfg_set REASONING_FORMAT LLAMACPP_REASONING_FORMAT reasoning.format "${reasoning_format_default}"
+  cfg_set REASONING_BUDGET LLAMACPP_REASONING_BUDGET reasoning.budget '-1'
+  cfg_set REASONING_BUDGET_MESSAGE LLAMACPP_REASONING_BUDGET_MESSAGE reasoning.budget_message ''
 
-  load_extra_server_args
+  load_extra_args
 
   case "${CACHE_TYPE_V}" in
     f32|f16|bf16|q8_0|q4_0|q4_1|iq4_nl|q5_0|q5_1|turbo2|turbo3|turbo4)
@@ -310,8 +330,42 @@ load_settings() {
       ;;
   esac
 
+  case "${FIT,,}" in
+    on|off)
+      FIT="${FIT,,}"
+      ;;
+    1|true|yes)
+      FIT="on"
+      ;;
+    0|false|no)
+      FIT="off"
+      ;;
+    *)
+      die "unsupported FIT=${FIT}; allowed: on,off,true,false,1,0"
+      ;;
+  esac
+
+  case "${FLASH_ATTN,,}" in
+    on|off|auto)
+      FLASH_ATTN="${FLASH_ATTN,,}"
+      ;;
+    1|true|yes)
+      FLASH_ATTN="on"
+      ;;
+    0|false|no)
+      FLASH_ATTN="off"
+      ;;
+    *)
+      die "unsupported FLASH_ATTN=${FLASH_ATTN}; allowed: on,off,auto,true,false,1,0"
+      ;;
+  esac
+
+  if [[ -n "${SAMPLERS}" && -n "${SAMPLER_SEQ}" ]]; then
+    die "set only one of inference.samplers or inference.sampler_seq"
+  fi
+
   if [[ -n "${CHAT_TEMPLATE_KWARGS}" ]]; then
-    require_commands jq
+    need_cmds jq
     CHAT_TEMPLATE_KWARGS="$(printf '%s' "${CHAT_TEMPLATE_KWARGS}" | jq -c 'if type == "object" then . else error("chat_template_kwargs must be a JSON object") end' 2>/dev/null)" \
       || die "chat_template_kwargs must be a valid JSON object"
   fi
@@ -455,33 +509,49 @@ start_container() {
     docker rm -f "${CONTAINER_NAME}" >/dev/null
   fi
 
-  local -a server_args=(
-    -hf "${HF_MODEL}"
-    --host "${SERVER_HOST}"
-    --port "${CONTAINER_PORT}"
-    --temp "${TEMP}"
-    --top-p "${TOP_P}"
-    --top-k "${TOP_K}"
-    --min-p "${MIN_P}"
-    --repeat-penalty "${REPEAT_PENALTY}"
-    --presence-penalty "${PRESENCE_PENALTY}"
-    --ctx-size "${CTX_SIZE}"
-    --fit "$(to_on_off "${FIT}")"
-    --flash-attn "$(to_on_off "${FLASH_ATTN}")"
-    --cache-type-k "${CACHE_TYPE_K}"
-    --cache-type-v "${CACHE_TYPE_V}"
-    --batch-size "${BATCH_SIZE}"
-    --ubatch-size "${UBATCH_SIZE}"
-    --parallel "${PARALLEL}"
-    --n-cpu-moe "${N_CPU_MOE}"
-    --poll "${POLL}"
-  )
+  local -a server_args=()
+  arg_add server_args -hf "${HF_MODEL}"
+  arg_add server_args --host "${SERVER_HOST}"
+  arg_add server_args --port "${CONTAINER_PORT}"
+  arg_add server_args --ctx-size "${CTX_SIZE}"
+  arg_add server_args --n-predict "${N_PREDICT}"
+  arg_add server_args --temp "${TEMP}"
+  arg_add server_args --dynatemp-range "${DYNATEMP_RANGE}"
+  arg_add server_args --dynatemp-exp "${DYNATEMP_EXP}"
+  arg_add server_args --top-k "${TOP_K}"
+  arg_add server_args --top-p "${TOP_P}"
+  arg_add server_args --min-p "${MIN_P}"
+  arg_add server_args --top-n-sigma "${TOP_N_SIGMA}"
+  arg_add server_args --xtc-probability "${XTC_PROBABILITY}"
+  arg_add server_args --xtc-threshold "${XTC_THRESHOLD}"
+  arg_add server_args --typical-p "${TYPICAL_P}"
+  arg_add server_args --samplers "${SAMPLERS}"
+  arg_add server_args --sampler-seq "${SAMPLER_SEQ}"
+  arg_add server_args --repeat-last-n "${REPEAT_LAST_N}"
+  arg_add server_args --repeat-penalty "${REPEAT_PENALTY}"
+  arg_add server_args --presence-penalty "${PRESENCE_PENALTY}"
+  arg_add server_args --frequency-penalty "${FREQUENCY_PENALTY}"
+  arg_add server_args --dry-multiplier "${DRY_MULTIPLIER}"
+  arg_add server_args --dry-base "${DRY_BASE}"
+  arg_add server_args --dry-allowed-length "${DRY_ALLOWED_LENGTH}"
+  arg_add server_args --dry-penalty-last-n "${DRY_PENALTY_LAST_N}"
+  arg_add server_args --batch-size "${BATCH_SIZE}"
+  arg_add server_args --ubatch-size "${UBATCH_SIZE}"
+  arg_add server_args --parallel "${PARALLEL}"
+  arg_add server_args --n-cpu-moe "${N_CPU_MOE}"
+  arg_add server_args --fit "${FIT}"
+  arg_add server_args --flash-attn "${FLASH_ATTN}"
+  arg_add server_args --cache-type-k "${CACHE_TYPE_K}"
+  arg_add server_args --cache-type-v "${CACHE_TYPE_V}"
+  arg_add server_args --poll "${POLL}"
 
-  is_truthy "${NO_MMAP}" && server_args+=(--no-mmap)
-  is_truthy "${KV_UNIFIED}" && server_args+=(--kv-unified)
-  is_truthy "${CACHE_IDLE_SLOTS}" && server_args+=(--cache-idle-slots)
-  is_truthy "${JINJA}" && server_args+=(--jinja)
-  [[ -n "${CHAT_TEMPLATE_KWARGS}" ]] && server_args+=(--chat-template-kwargs "${CHAT_TEMPLATE_KWARGS}")
+  arg_bool server_args "${NO_MMAP}" --no-mmap
+  arg_bool server_args "${KV_UNIFIED}" --kv-unified --no-kv-unified
+  arg_bool server_args "${CACHE_IDLE_SLOTS}" --cache-idle-slots --no-cache-idle-slots
+  arg_bool server_args "${BACKEND_SAMPLING}" --backend-sampling
+  arg_bool server_args "${WEB_UI}" --webui --no-webui
+  arg_bool server_args "${JINJA}" --jinja --no-jinja
+  arg_add server_args --chat-template-kwargs "${CHAT_TEMPLATE_KWARGS}"
 
   [[ -n "${ENABLE_REASONING}" ]] && server_args+=(--reasoning "${ENABLE_REASONING}")
   if [[ "${ENABLE_REASONING}" != "off" ]]; then
@@ -514,9 +584,6 @@ start_container() {
   docker run "${run_args[@]}" "${IMAGE_NAME}" "${server_args[@]}" >/dev/null
   ok "started ${CONTAINER_NAME} on http://localhost:${HOST_PORT}"
 }
-
-show_logs() { require_docker; docker logs -f "${CONTAINER_NAME}"; }
-show_status() { require_docker; docker ps -a --filter "name=^/${CONTAINER_NAME}$"; }
 
 clean_all() {
   require_docker
@@ -556,9 +623,20 @@ Important environment variables:
   LLAMACPP_IMAGE_NAME, LLAMACPP_CONTAINER_NAME, LLAMACPP_MODELS_DIR,
   LLAMACPP_HF_MODEL, LLAMACPP_HF_TOKEN, LLAMACPP_HOST_PORT,
   LLAMACPP_HOST_TZ, LLAMACPP_HOST_LANG, LLAMACPP_HOST_LC_ALL,
-  LLAMACPP_SERVER_HOST, LLAMACPP_CTX_SIZE, LLAMACPP_FIT,
+  LLAMACPP_SERVER_HOST, LLAMACPP_CTX_SIZE, LLAMACPP_N_PREDICT,
+  LLAMACPP_TEMP, LLAMACPP_DYNATEMP_RANGE, LLAMACPP_DYNATEMP_EXP,
+  LLAMACPP_TOP_K, LLAMACPP_TOP_P, LLAMACPP_MIN_P,
+  LLAMACPP_TOP_N_SIGMA, LLAMACPP_TYPICAL_P,
+  LLAMACPP_XTC_PROBABILITY, LLAMACPP_XTC_THRESHOLD,
+  LLAMACPP_SAMPLERS, LLAMACPP_SAMPLER_SEQ,
+  LLAMACPP_REPEAT_LAST_N,
+  LLAMACPP_REPEAT_PENALTY, LLAMACPP_PRESENCE_PENALTY,
+  LLAMACPP_FREQUENCY_PENALTY, LLAMACPP_DRY_MULTIPLIER,
+  LLAMACPP_DRY_BASE, LLAMACPP_DRY_ALLOWED_LENGTH,
+  LLAMACPP_DRY_PENALTY_LAST_N, LLAMACPP_FIT,
   LLAMACPP_FLASH_ATTN, LLAMACPP_CACHE_TYPE_K, LLAMACPP_CACHE_TYPE_V,
   LLAMACPP_KV_UNIFIED, LLAMACPP_CACHE_IDLE_SLOTS,
+  LLAMACPP_BACKEND_SAMPLING, LLAMACPP_WEB_UI,
   LLAMACPP_NO_MMAP, LLAMACPP_POLL, LLAMACPP_JINJA,
   LLAMACPP_CHAT_TEMPLATE_KWARGS, LLAMACPP_EXTRA_SERVER_ARGS,
   LLAMACPP_LLAMA_CPP_REPO, LLAMACPP_LLAMA_CPP_REF,
@@ -588,10 +666,12 @@ main() {
       start_container
       ;;
     logs)
-      show_logs
+      require_docker
+      docker logs -f "${CONTAINER_NAME}"
       ;;
     status)
-      show_status
+      require_docker
+      docker ps -a --filter "name=^/${CONTAINER_NAME}$"
       ;;
     clean)
       clean_all
@@ -608,6 +688,6 @@ main() {
 }
 
 load_config
-load_settings
+load_cfg
 
 main "${@}"
