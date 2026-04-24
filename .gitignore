@@ -1,0 +1,19 @@
+# Local runtime configuration and secrets
+config.json
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Model cache / artifacts
+models/
+
+# Logs and temp files
+*.log
+*.tmp
+
+# OS/editor noise
+.DS_Store
+.vscode/
+.idea/

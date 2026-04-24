@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
+  exit 0
+fi
+
+staged_added_lines="$({
+  git diff --cached --no-color --unified=0
+} | sed -n 's/^+//p' | grep -v '^+++' || true)"
+
+[[ -z "${staged_added_lines}" ]] && exit 0
+
+# High-signal patterns and key material markers.
+secret_pattern='(AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|AIza[0-9A-Za-z_\-]{35}|xox[baprs]-[A-Za-z0-9\-]{10,}|-----BEGIN (RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----|([Pp]assword|[Tt]oken|[Ss]ecret|[Aa]pi[_-]?[Kk]ey|[Cc]lient[_-]?[Ss]ecret)[[:space:]]*[:=][[:space:]]*["'\'']?[A-Za-z0-9_./+=\-]{12,})'
+
+# Ignore obvious placeholders/examples to reduce false positives.
+allow_pattern='(example|dummy|changeme|placeholder|your[_-]?(token|secret|api|password|key)|<redacted>|<secret>)'
+
+hits="$({
+  printf '%s\n' "${staged_added_lines}" | grep -Ein "${secret_pattern}" || true
+} | grep -Eiv "${allow_pattern}" || true)"
+
+if [[ -n "${hits}" ]]; then
+  echo "[pre-commit] blocked: potential secret(s) detected in staged changes." >&2
+  echo "${hits}" >&2
+  echo "Remove or redact secrets before committing." >&2
+  exit 1
+fi
+
+exit 0
