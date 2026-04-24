@@ -11,6 +11,8 @@ Thanks for contributing to easyllama.
 cp config.json.example config.json
 ```
 
+If testing turbo cache types, set turbo-capable fork settings in local config.json and rebuild before start.
+
 3. Configure local hooks:
 
 ```bash
