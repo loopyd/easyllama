@@ -166,9 +166,14 @@ Note: set only one of sampler_seq or samplers.
 | cache_idle_slots | --cache-idle-slots / --no-cache-idle-slots | Save and clear idle slots on new tasks. | true |
 | web_ui | --webui / --no-webui | Enable or disable built-in web UI. | true |
 | jinja | --jinja / --no-jinja | Enable or disable Jinja chat templating. | true |
+| no_warmup | --no-warmup | Skip warmup pass when starting the server. | false |
 | no_mmap | --no-mmap | Disable memory-mapped model loading. | false |
 | poll | --poll | Polling level used to wait for work. | 50 |
+| chat_template_file | --chat-template-file | Path to a Jinja chat template file. **(1)** | unset |
 | chat_template_kwargs | --chat-template-kwargs | Extra JSON args for template parser. | unset |
+
+> **(1)** **Chat templates**: Setup, path mapping, and attribution are documented in [chat_template/README.md](chat_template/README.md).
+
 
 ## Extra Server Args
 

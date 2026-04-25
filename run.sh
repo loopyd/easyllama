@@ -195,6 +195,33 @@ abs_path() {
   fi
 }
 
+resolve_chat_template_file_for_container() {
+  local configured_path="${1}"
+  local host_template_dir="${SCRIPT_DIR}/chat_template"
+
+  [[ -n "${configured_path}" ]] || {
+    printf '%s' ""
+    return
+  }
+
+  case "${configured_path}" in
+    chat_template/*)
+      printf '%s' "/chat_template/${configured_path#chat_template/}"
+      return
+      ;;
+    /chat_template/*)
+      printf '%s' "${configured_path}"
+      return
+      ;;
+    "${host_template_dir}"/*)
+      printf '%s' "/chat_template/${configured_path#${host_template_dir}/}"
+      return
+      ;;
+  esac
+
+  printf '%s' "${configured_path}"
+}
+
 arg_add() {
   local -n args_ref="${1}"
   local flag="${2}"
@@ -304,9 +331,11 @@ load_cfg() {
   cfg_set CACHE_IDLE_SLOTS LLAMACPP_CACHE_IDLE_SLOTS inference.cache_idle_slots '1'
   cfg_set BACKEND_SAMPLING LLAMACPP_BACKEND_SAMPLING inference.backend_sampling '0'
   cfg_set WEB_UI LLAMACPP_WEB_UI inference.web_ui '1'
+  cfg_set NO_WARMUP LLAMACPP_NO_WARMUP inference.no_warmup '0'
   cfg_set NO_MMAP LLAMACPP_NO_MMAP inference.no_mmap '0'
   cfg_set POLL LLAMACPP_POLL inference.poll '50'
   cfg_set JINJA LLAMACPP_JINJA inference.jinja '1'
+  cfg_set CHAT_TEMPLATE_FILE LLAMACPP_CHAT_TEMPLATE_FILE inference.chat_template_file ''
   cfg_set CHAT_TEMPLATE_KWARGS LLAMACPP_CHAT_TEMPLATE_KWARGS inference.chat_template_kwargs ''
 
   cfg_set ENABLE_REASONING LLAMACPP_ENABLE_REASONING reasoning.enable 'auto'
@@ -503,6 +532,13 @@ start_container() {
   validate_cache_type_v_support
   mkdir -p -- "${MODELS_DIR}"
 
+  local chat_template_file_container
+  chat_template_file_container="$(resolve_chat_template_file_for_container "${CHAT_TEMPLATE_FILE}")"
+
+  if [[ "${chat_template_file_container}" == /chat_template/* && ! -d "${SCRIPT_DIR}/chat_template" ]]; then
+    die "CHAT_TEMPLATE_FILE points to chat_template/, but ${SCRIPT_DIR}/chat_template does not exist"
+  fi
+
   if container_running; then
     warn "container ${CONTAINER_NAME} is already running"
     return 0
@@ -554,7 +590,9 @@ start_container() {
   arg_bool server_args "${CACHE_IDLE_SLOTS}" --cache-idle-slots --no-cache-idle-slots
   arg_bool server_args "${BACKEND_SAMPLING}" --backend-sampling
   arg_bool server_args "${WEB_UI}" --webui --no-webui
+  arg_bool server_args "${NO_WARMUP}" --no-warmup
   arg_bool server_args "${JINJA}" --jinja --no-jinja
+  arg_add server_args --chat-template-file "${chat_template_file_container}"
   arg_add server_args --chat-template-kwargs "${CHAT_TEMPLATE_KWARGS}"
 
   [[ -n "${ENABLE_REASONING}" ]] && server_args+=(--reasoning "${ENABLE_REASONING}")
@@ -580,6 +618,10 @@ start_container() {
     --env "LANG=${HOST_LANG}"
     --env "LC_ALL=${HOST_LC_ALL}"
   )
+
+  if [[ -d "${SCRIPT_DIR}/chat_template" ]]; then
+    run_args+=(--volume "${SCRIPT_DIR}/chat_template:/chat_template:ro")
+  fi
 
   [[ -r /etc/localtime ]] && run_args+=(--volume /etc/localtime:/etc/localtime:ro)
   [[ -r /etc/timezone ]] && run_args+=(--volume /etc/timezone:/etc/timezone:ro)
@@ -641,8 +683,9 @@ Important environment variables:
   LLAMACPP_FLASH_ATTN, LLAMACPP_CACHE_TYPE_K, LLAMACPP_CACHE_TYPE_V,
   LLAMACPP_KV_UNIFIED, LLAMACPP_CACHE_IDLE_SLOTS,
   LLAMACPP_BACKEND_SAMPLING, LLAMACPP_WEB_UI,
-  LLAMACPP_NO_MMAP, LLAMACPP_POLL, LLAMACPP_JINJA,
-  LLAMACPP_CHAT_TEMPLATE_KWARGS, LLAMACPP_EXTRA_SERVER_ARGS,
+  LLAMACPP_NO_WARMUP, LLAMACPP_NO_MMAP, LLAMACPP_POLL, LLAMACPP_JINJA,
+  LLAMACPP_CHAT_TEMPLATE_FILE, LLAMACPP_CHAT_TEMPLATE_KWARGS,
+  LLAMACPP_EXTRA_SERVER_ARGS,
   LLAMACPP_LLAMA_CPP_REPO, LLAMACPP_LLAMA_CPP_REF,
   LLAMACPP_CMAKE_CUDA_ARCHITECTURES(auto|list),
   LLAMACPP_DEFAULT_CUDA_ARCHITECTURES, LLAMACPP_CONFIG_FILE

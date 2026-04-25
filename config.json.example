@@ -65,9 +65,11 @@
     "cache_idle_slots": true,
     "backend_sampling": false,
     "web_ui": true,
+    "no_warmup": false,
     "no_mmap": false,
     "poll": 50,
     "jinja": true,
+    "chat_template_file": "",
     "chat_template_kwargs": "",
     "extra_server_args": []
   },

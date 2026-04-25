@@ -8,6 +8,7 @@ config.json
 
 # Model cache / artifacts
 models/
+!models/.gitkeep
 
 # Logs and temp files
 *.log
