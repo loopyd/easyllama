@@ -70,6 +70,7 @@ RUN --mount=type=cache,id=llamacpp-apt-cache-runtime,target=/var/cache/apt,shari
     apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     curl \
+    jq \
     ca-certificates \
     libssl3 \
     tzdata \
@@ -83,10 +84,14 @@ RUN ln -snf "/usr/share/zoneinfo/${HOST_TZ}" /etc/localtime \
 
 WORKDIR /app
 COPY --from=builder /app/build/bin/ /app/bin/
+COPY run.sh /app/run.sh
+COPY config.json.example /app/config.json.example
+RUN chmod 755 /app/run.sh
 ENV LD_LIBRARY_PATH=/app/bin:/usr/local/cuda/lib64
 
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD curl --fail --silent http://127.0.0.1:8080/health >/dev/null || exit 1
 
-ENTRYPOINT ["/app/bin/llama-server"]
+ENTRYPOINT ["/app/run.sh"]
+CMD ["serve"]

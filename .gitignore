@@ -7,8 +7,12 @@ config.json
 !.env.example
 
 # Model cache / artifacts
-models/
+models/*
 !models/.gitkeep
+mmproj/*
+!mmproj/.gitkeep
+chat_template/*
+!chat_template/.gitkeep
 
 # Logs and temp files
 *.log

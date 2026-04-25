@@ -2,7 +2,9 @@
   "container": {
     "image_name": "llamacpp-local:cuda13",
     "container_name": "llamacpp-server",
-    "models_dir": "models"
+    "models_dir": "models",
+    "chat_template_dir": "chat_template",
+    "mmproj_dir": "mmproj"
   },
   "network": {
     "host_port": 8080,
@@ -26,7 +28,8 @@
   },
   "model": {
     "hf_model": "user/repo-name:QUANT_TYPE",
-    "hf_token": ""
+    "hf_token": "",
+    "hf_mmproj": ""
   },
   "inference": {
     "ctx_size": 0,
@@ -69,6 +72,7 @@
     "no_mmap": false,
     "poll": 50,
     "jinja": true,
+    "mmproj_file": "",
     "chat_template_file": "",
     "chat_template_kwargs": "",
     "extra_server_args": []

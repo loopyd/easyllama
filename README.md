@@ -33,6 +33,7 @@ Minimal, GPU-focused llama.cpp runner for NVIDIA systems.
 | ./run.sh status | Show container state |
 | ./run.sh logs | Follow container logs |
 | ./run.sh clean | Remove container and local image |
+| ./run.sh serve | Run llama-server from config (container entrypoint mode) |
 
 ## Quick Start
 
@@ -74,6 +75,13 @@ cp config.json.example config.json
 ```
 
 Config keys are optional. If a key is missing (or null for optional numeric keys), run.sh falls back to built-in defaults.
+
+Host mode detail: `./run.sh start` mounts your active config as `/app/config.json` inside the container and launches `./run.sh serve` there, so URL-based downloads (for example `model.hf_mmproj`) occur at runtime against mounted host folders.
+
+Container path keys:
+- container.models_dir: host models cache mount source
+- container.chat_template_dir: host chat template mount source
+- container.mmproj_dir: host mmproj mount source (download target for model.hf_mmproj)
 
 Example env override:
 
@@ -166,6 +174,8 @@ Note: set only one of sampler_seq or samplers.
 | cache_idle_slots | --cache-idle-slots / --no-cache-idle-slots | Save and clear idle slots on new tasks. | true |
 | web_ui | --webui / --no-webui | Enable or disable built-in web UI. | true |
 | jinja | --jinja / --no-jinja | Enable or disable Jinja chat templating. | true |
+| mmproj_file | --mmproj | Multi-modal projector GGUF file path. Supports URL download and local/container paths. | unset |
+| model.hf_mmproj | --mmproj (resolved) | Hugging Face shorthand in format owner/repo/file.gguf, resolved to a blob URL and downloaded into mmproj_dir. | unset |
 | no_warmup | --no-warmup | Skip warmup pass when starting the server. | false |
 | no_mmap | --no-mmap | Disable memory-mapped model loading. | false |
 | poll | --poll | Polling level used to wait for work. | 50 |
@@ -174,6 +184,14 @@ Note: set only one of sampler_seq or samplers.
 
 > **(1)** **Chat templates**: Setup, path mapping, and attribution are documented in [chat_template/README.md](chat_template/README.md).
 
+For mmproj_file, you can provide:
+- a Hugging Face URL (including /blob/... links), which run.sh downloads into container.mmproj_dir and passes as a mounted container path
+- a local path under container.mmproj_dir (relative or absolute)
+- a direct container path
+
+For model.hf_mmproj, provide owner/repo/file.gguf (for example HauhauCS/Qwen3.6-27B-Uncensored-HauhauCS-Balanced/mmproj-Qwen3.6-27B-Uncensored-HauhauCS-Balanced-f16.gguf). run.sh resolves it to https://huggingface.co/<owner>/<repo>/blob/main/<file>, downloads it into container.mmproj_dir, and passes --mmproj from the mounted /mmproj path.
+
+If both model.hf_mmproj and inference.mmproj_file are set, model.hf_mmproj takes precedence.
 
 ## Extra Server Args
 
