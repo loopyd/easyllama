@@ -30,6 +30,8 @@
   },
   "inference": {
     "ctx_size": 0,
+    "threads": 8,
+    "threads_batch": 16,
     "n_predict": -1,
     "temp": 0.8,
     "dynatemp_range": 0.0,

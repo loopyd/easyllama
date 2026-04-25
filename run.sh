@@ -269,6 +269,8 @@ load_cfg() {
   cfg_set SERVER_HOST LLAMACPP_SERVER_HOST network.server_host '0.0.0.0'
 
   cfg_set CTX_SIZE LLAMACPP_CTX_SIZE inference.ctx_size '0'
+  cfg_set THREADS LLAMACPP_THREADS inference.threads ''
+  cfg_set THREADS_BATCH LLAMACPP_THREADS_BATCH inference.threads_batch ''
   cfg_set N_PREDICT LLAMACPP_N_PREDICT inference.n_predict '-1'
   cfg_set TEMP LLAMACPP_TEMP inference.temp '0.80'
   cfg_set DYNATEMP_RANGE LLAMACPP_DYNATEMP_RANGE inference.dynatemp_range '0.00'
@@ -514,6 +516,8 @@ start_container() {
   arg_add server_args --host "${SERVER_HOST}"
   arg_add server_args --port "${CONTAINER_PORT}"
   arg_add server_args --ctx-size "${CTX_SIZE}"
+  arg_add server_args --threads "${THREADS}"
+  arg_add server_args --threads-batch "${THREADS_BATCH}"
   arg_add server_args --n-predict "${N_PREDICT}"
   arg_add server_args --temp "${TEMP}"
   arg_add server_args --dynatemp-range "${DYNATEMP_RANGE}"

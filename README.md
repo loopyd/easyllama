@@ -152,6 +152,8 @@ Note: set only one of sampler_seq or samplers.
 | --- | --- | --- | --- |
 | n_predict | --n-predict | Max generated tokens per response. | -1 |
 | ctx_size | --ctx-size | Context window size (0 uses model default). | 0 |
+| threads | --threads | Number of CPU threads used during generation. | unset (llama default) |
+| threads_batch | --threads-batch | Number of CPU threads used during batch/prompt processing. | unset (llama default) |
 | batch_size | --batch-size | Logical max token batch size. | 2048 |
 | ubatch_size | --ubatch-size | Physical micro-batch size for compute. | 512 |
 | parallel | --parallel | Number of server slots/parallel sequences. | -1 |
