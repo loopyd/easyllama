@@ -136,6 +136,8 @@ LLAMACPP_LS_CONFIG_FILE=/path/to/custom.yaml ./run.sh swap
 
 Your Hugging Face token is resolved from `auth.json` (`hf_token`) and passed as an environment variable to the container. The embedding model downloads automatically on first request via `-hf Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M`.
 
+If `auth.json` also contains `api_key` (or `LLAMACPP_API_KEY` / `API_KEY` is set), run.sh enables llama-swap `apiKeys` so local `/v1/*` endpoints require that key.
+
 If you need a different token for swap mode:
 
 ```bash

@@ -6,7 +6,7 @@ GPU-focused llama.cpp runner that uses llama-swap as the only runtime entrypoint
 
 - build a CUDA image with your chosen llama.cpp repo/ref
 - run a single swap container that serves multiple models from config.yaml
-- keep credentials in auth.json (token only)
+- keep credentials in auth.json (Hugging Face token + optional local API key)
 
 Single-model start/stop/serve paths were removed on purpose.
 
@@ -50,11 +50,12 @@ curl -sS http://127.0.0.1:8080/v1/models | jq '.data[].id'
 
 ## Credentials
 
-Create auth.json from auth.json.example and set only your token:
+Create auth.json from auth.json.example and set your credentials:
 
 ```json
 {
-  "hf_token": "hf_..."
+  "hf_token": "hf_...",
+  "api_key": "your-local-endpoint-key"
 }
 ```
 
@@ -64,6 +65,14 @@ Precedence for token resolution:
 2. LLAMACPP_HF_TOKEN
 3. auth.json (or LLAMACPP_AUTH_FILE)
 4. auth.json.example
+
+Precedence for local endpoint API key:
+
+1. LLAMACPP_API_KEY
+2. API_KEY
+3. auth.json api_key (or LLAMACPP_AUTH_FILE)
+
+When api_key is set, run.sh generates an effective llama-swap config with top-level apiKeys enabled, so /v1/* endpoints require Authorization: Bearer <api_key> or x-api-key.
 
 ## mmproj Integration
 

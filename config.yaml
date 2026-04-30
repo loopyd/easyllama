@@ -55,11 +55,11 @@ macros:
   no_warmup: "--no-warmup"
   mmproj_arg: "${env.LLAMACPP_MMPROJ_ARG}"
   chat_template_file: "/chat_template/qwen3.6.jinja"
-  chat_template_kwargs: "'{\"tokenize\":false,\"add_generation_prompt\":true,\"preserve_thinking\":true}'"
+  chat_template_kwargs: '{\"tokenize\":false,\"add_generation_prompt\":true,\"preserve_thinking\":true}'
   reasoning: "on"
   reasoning_format: "auto"
   reasoning_budget: "4096"
-  reasoning_budget_message: '"... output your final answer now."'
+  reasoning_budget_message: '...\ output\ your\ final\ answer\ now.'
   emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
   emb_cache_type_k: "f16"
   emb_cache_type_v: "f16"

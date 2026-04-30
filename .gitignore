@@ -17,6 +17,7 @@ chat_template/*
 # Logs and temp files
 *.log
 *.tmp
+.runtime/
 
 # OS/editor noise
 .DS_Store
