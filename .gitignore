@@ -1,5 +1,5 @@
 # Local runtime configuration and secrets
-config.json
+auth.json
 
 # Environment files
 .env

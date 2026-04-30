@@ -5,15 +5,15 @@ Thanks for contributing to easyllama.
 ## Development Setup
 
 1. Ensure requirements are installed (Docker, NVIDIA runtime, jq).
-2. Use the config template:
+2. Use the auth template:
 
 ```bash
-cp config.json.example config.json
+cp auth.json.example auth.json
 ```
 
-If testing turbo cache types, set turbo-capable fork settings in local config.json and rebuild before start.
+If testing turbo cache types, set turbo-capable build env vars (LLAMACPP_LLAMA_CPP_REPO and LLAMACPP_LLAMA_CPP_REF) and rebuild.
 
-3. Configure local hooks:
+1. Configure local hooks:
 
 ```bash
 git config core.hooksPath .githooks
@@ -29,15 +29,15 @@ chmod +x .githooks/pre-commit
 ```bash
 bash -n run.sh
 ./run.sh build
-./run.sh restart
+./run.sh restart-swap
 curl -sS http://127.0.0.1:8080/health
 ```
 
 ## Security
 
 - Never commit secrets.
-- Keep real tokens only in local config.json or environment.
-- Commit only config.json.example.
+- Keep real tokens only in local auth.json or environment.
+- Commit only auth.json.example.
 
 ## Pull Requests
 

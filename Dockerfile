@@ -1,5 +1,22 @@
 # syntax=docker/dockerfile:1.7-labs
 ARG CUDA_VERSION=13.1.0
+
+# ── Download llama-swap binary (multi-model orchestrator) ───
+FROM ubuntu:24.04 AS ls-download
+ARG LS_VERSION=v208
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /install
+RUN ARCH=$(dpkg --print-architecture) && \
+    case "${ARCH}" in \
+        amd64) A="amd64" ;; \
+        arm64) A="arm64" ;; \
+        *) echo "Unsupported arch: ${ARCH}"; exit 1 ;; \
+    esac && \
+    curl -fSL -o /tmp/ls.tar.gz "https://github.com/mostlygeek/llama-swap/releases/download/${LS_VERSION}/llama-swap_${LS_VERSION#v}_linux_${A}.tar.gz" && \
+    tar xzf /tmp/ls.tar.gz -C /install/
+
+# ── Main builder for llama.cpp ──────────────────────────────
 FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu24.04 AS builder
 
 ARG DEBIAN_FRONTEND=noninteractive
@@ -85,9 +102,13 @@ RUN ln -snf "/usr/share/zoneinfo/${HOST_TZ}" /etc/localtime \
 WORKDIR /app
 COPY --from=builder /app/build/bin/ /app/bin/
 COPY run.sh /app/run.sh
-COPY config.json.example /app/config.json.example
+COPY auth.json.example /app/auth.json.example
+COPY config.yaml /app/config.yaml
 RUN chmod 755 /app/run.sh
 ENV LD_LIBRARY_PATH=/app/bin:/usr/local/cuda/lib64
+
+# Install llama-swap (multi-model proxy/orchestrator)
+COPY --from=ls-download /install/llama-swap /app/bin/llama-swap
 
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

@@ -1,0 +1,144 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/mostlygeek/llama-swap/refs/heads/main/config-schema.json
+#
+# llama-swap configuration for multi-model serving with turboquant fork
+# ================================================================
+# This config defines two models served through llama-swap:
+#   - qwen3-chat: Qwen3.6 chat/completions model
+#   - qwen3-embeddings: Qwen3-Embedding-8B-GGUF Q5_K_M for /v1/embeddings
+#
+# Usage:
+#   ./run.sh swap          # Start container with llama-swap orchestrator
+#   curl http://localhost:8080/v1/models  # List available models
+#
+# API access:
+#   Chat completions:  POST /v1/chat/completions {"model": "qwen3-chat", ...}
+#   Embeddings:        POST /v1/embeddings      {"model": "qwen3-embeddings", ...}
+
+healthCheckTimeout: 600
+logLevel: info
+sendLoadingState: true
+globalTTL: 0
+
+# Shared inference macros for llama-server commands
+macros:
+  server_bin: "/app/bin/llama-server"
+  kv_ctx_size: "131072"
+  chat_hf_model: "HauhauCS/Qwen3.6-27B-Uncensored-HauhauCS-Aggressive:Q5_K_P"
+  n_predict: "8192"
+  temp: "0.6"
+  top_k: "20"
+  top_p: "0.95"
+  min_p: "0.0"
+  sampler_seq: "edskypmxt"
+  repeat_last_n: "512"
+  repeat_penalty: "1.05"
+  presence_penalty: "1.5"
+  frequency_penalty: "0.0"
+  dry_multiplier: "0.0"
+  dry_base: "1.75"
+  dry_allowed_length: "2"
+  dry_penalty_last_n: "2048"
+  batch_size: "1024"
+  ubatch_size: "256"
+  parallel: "1"
+  flash_attn: "on"
+  fit: "on"
+  cache_type_k: "turbo4"
+  cache_type_v: "turbo4"
+  poll: "1"
+  no_mmap: "--no-mmap"
+  kv_unified: "--kv-unified"
+  cache_idle_slots: "--cache-idle-slots"
+  backend_sampling: "--backend-sampling"
+  web_ui_off: "--no-webui"
+  jinja_on: "--jinja"
+  no_warmup: "--no-warmup"
+  mmproj_arg: "${env.LLAMACPP_MMPROJ_ARG}"
+  chat_template_file: "/chat_template/qwen3.6.jinja"
+  chat_template_kwargs: "'{\"tokenize\":false,\"add_generation_prompt\":true,\"preserve_thinking\":true}'"
+  reasoning: "on"
+  reasoning_format: "auto"
+  reasoning_budget: "4096"
+  reasoning_budget_message: '"... output your final answer now."'
+  emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
+  emb_cache_type_k: "f16"
+  emb_cache_type_v: "f16"
+
+models:
+  # ──────────────────────────────────────────────────────────────
+  # Qwen3.6 Chat Model — OpenAI-compatible completions endpoint
+  # Uses tuned chat/completions inference parameters
+  # ──────────────────────────────────────────────────────────────
+  "qwen3-chat":
+    name: "Qwen3.6-27B-Uncensored-HauhauCS-Aggressive"
+    description: "Primary chat/completions model — turboquant KV cache enabled"
+    cmd: |
+      ${server_bin}
+      --port ${PORT}
+      -hf ${chat_hf_model}
+      ${mmproj_arg}
+      --ctx-size ${kv_ctx_size}
+      --n-predict ${n_predict}
+      --temp ${temp}
+      --top-k ${top_k}
+      --top-p ${top_p}
+      --min-p ${min_p}
+      --sampler-seq ${sampler_seq}
+      --repeat-last-n ${repeat_last_n}
+      --repeat-penalty ${repeat_penalty}
+      --presence-penalty ${presence_penalty}
+      --frequency-penalty ${frequency_penalty}
+      --dry-multiplier ${dry_multiplier}
+      --dry-base ${dry_base}
+      --dry-allowed-length ${dry_allowed_length}
+      --dry-penalty-last-n ${dry_penalty_last_n}
+      --batch-size ${batch_size}
+      --ubatch-size ${ubatch_size}
+      --parallel ${parallel}
+      --fit ${fit}
+      --flash-attn ${flash_attn}
+      --cache-type-k ${cache_type_k}
+      --cache-type-v ${cache_type_v}
+      ${kv_unified}
+      ${cache_idle_slots}
+      ${backend_sampling}
+      ${web_ui_off}
+      ${no_warmup}
+      ${no_mmap}
+      --poll ${poll}
+      ${jinja_on}
+      --chat-template-file ${chat_template_file}
+      --chat-template-kwargs ${chat_template_kwargs}
+      --reasoning ${reasoning}
+      --reasoning-format ${reasoning_format}
+      --reasoning-budget ${reasoning_budget}
+      --reasoning-budget-message ${reasoning_budget_message}
+
+    env:
+      - "HF_TOKEN=${env.HF_TOKEN}"
+
+  # ──────────────────────────────────────────────────────────────
+  # Qwen3 Embedding Model — /v1/embeddings endpoint
+  # Lightweight config optimized for embedding inference
+  # ──────────────────────────────────────────────────────────────
+  "qwen3-embeddings":
+    name: "Qwen3-Embedding-8B-Q5_K_M"
+    description: "Dense embedding model for vector search, RAG, similarity"
+    cmd: |
+      ${server_bin}
+      --port ${PORT}
+      -hf ${emb_hf_model}
+      --ctx-size ${kv_ctx_size}
+      --batch-size ${batch_size}
+      --ubatch-size ${ubatch_size}
+      --parallel ${parallel}
+      --flash-attn ${flash_attn}
+      --cache-type-k ${emb_cache_type_k}
+      --cache-type-v ${emb_cache_type_v}
+      ${kv_unified}
+      ${no_mmap}
+      --embedding
+      ${no_warmup}
+
+    env:
+      - "HF_TOKEN=${env.HF_TOKEN}"
