@@ -103,7 +103,7 @@ WORKDIR /app
 COPY --from=builder /app/build/bin/ /app/bin/
 COPY run.sh /app/run.sh
 COPY auth.json.example /app/auth.json.example
-COPY config.yaml /app/config.yaml
+COPY config.yml.example /app/config.yml.example
 RUN chmod 755 /app/run.sh
 ENV LD_LIBRARY_PATH=/app/bin:/usr/local/cuda/lib64
 

@@ -1,25 +1,27 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/mostlygeek/llama-swap/refs/heads/main/config-schema.json
 #
-# llama-swap configuration for multi-model serving with turboquant fork
-# ================================================================
-# This config defines two models served through llama-swap:
-#   - qwen3-chat: Qwen3.6 chat/completions model
-#   - qwen3-embeddings: Qwen3-Embedding-8B-GGUF Q5_K_M for /v1/embeddings
+# Copy this file to config.yml for local edits and overrides.
+# easy llama(cpp) llama-swap config
 #
-# Usage:
-#   ./run.sh swap          # Start container with llama-swap orchestrator
-#   curl http://localhost:8080/v1/models  # List available models
+# Exposes:
+# - qwen3-chat for chat/completions-style requests
+# - qwen3-embeddings for /v1/embeddings
 #
-# API access:
-#   Chat completions:  POST /v1/chat/completions {"model": "qwen3-chat", ...}
-#   Embeddings:        POST /v1/embeddings      {"model": "qwen3-embeddings", ...}
+# Common local flow:
+# - cp config.yml.example config.yml
+# - ./run.sh start
+# - curl http://localhost:8080/v1/models
+#
+# Primary API routes:
+# - POST /v1/chat/completions with model=qwen3-chat
+# - POST /v1/embeddings with model=qwen3-embeddings
 
 healthCheckTimeout: 600
 logLevel: info
 sendLoadingState: true
 globalTTL: 0
 
-# Shared inference macros for llama-server commands
+# Shared llama-server argument macros
 macros:
   server_bin: "/app/bin/llama-server"
   kv_ctx_size: "131072"
@@ -65,10 +67,8 @@ macros:
   emb_cache_type_v: "f16"
 
 models:
-  # ──────────────────────────────────────────────────────────────
-  # Qwen3.6 Chat Model — OpenAI-compatible completions endpoint
-  # Uses tuned chat/completions inference parameters
-  # ──────────────────────────────────────────────────────────────
+  # Chat model
+  # OpenAI-compatible completions/chat endpoint with tuned inference defaults.
   "qwen3-chat":
     name: "Qwen3.6-27B-Uncensored-HauhauCS-Aggressive"
     description: "Primary chat/completions model — turboquant KV cache enabled"
@@ -117,10 +117,8 @@ models:
     env:
       - "HF_TOKEN=${env.HF_TOKEN}"
 
-  # ──────────────────────────────────────────────────────────────
-  # Qwen3 Embedding Model — /v1/embeddings endpoint
-  # Lightweight config optimized for embedding inference
-  # ──────────────────────────────────────────────────────────────
+  # Embedding model
+  # Lightweight config for /v1/embeddings requests.
   "qwen3-embeddings":
     name: "Qwen3-Embedding-8B-Q5_K_M"
     description: "Dense embedding model for vector search, RAG, similarity"

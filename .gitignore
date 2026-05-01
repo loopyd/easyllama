@@ -1,5 +1,6 @@
 # Local runtime configuration and secrets
 auth.json
+config.yml
 
 # Environment files
 .env
@@ -23,3 +24,4 @@ chat_template/*
 .DS_Store
 .vscode/
 .idea/
+.serena/
