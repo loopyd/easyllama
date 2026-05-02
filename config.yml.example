@@ -76,6 +76,8 @@ macros:
   reasoning_budget_message: '...\ output\ your\ final\ answer\ now.'
   emb_cache_type_k: "f16"
   emb_cache_type_v: "f16"
+  rerank_batch_size: "2048"
+  rerank_ubatch_size: "2048"
   rerank_ctx_size: "4096"
 
 models:
@@ -236,8 +238,8 @@ models:
       --port ${PORT}
       -hf ${qmd_rerank_hf_model}
       --ctx-size ${rerank_ctx_size}
-      --batch-size ${batch_size}
-      --ubatch-size ${ubatch_size}
+      --batch-size ${rerank_batch_size}
+      --ubatch-size ${rerank_ubatch_size}
       --parallel ${parallel}
       --flash-attn ${flash_attn}
       --cache-type-k ${emb_cache_type_k}
