@@ -6,17 +6,23 @@
 # Exposes:
 # - qwen3-chat for chat/completions-style requests
 # - qwen3-embeddings for /v1/embeddings
+# - qmd-generate for QMD completions/query expansion
+# - qmd-embed for QMD embeddings
+# - qmd-rerank for /v1/rerank
 #
 # Common local flow:
 # - cp config.yml.example config.yml
 # - ./run.sh start
 # - curl http://localhost:8080/v1/models
 # - model downloads begin on first authenticated use, not during container startup
-# - optional: ./run.sh warmup qwen3-chat qwen3-embeddings
+# - optional: ./run.sh warmup qwen3-chat qwen3-embeddings qmd-rerank
 #
 # Primary API routes:
 # - POST /v1/chat/completions with model=qwen3-chat
 # - POST /v1/embeddings with model=qwen3-embeddings
+# - POST /v1/completions with model=qmd-generate
+# - POST /v1/embeddings with model=qmd-embed
+# - POST /v1/rerank with model=qmd-rerank
 
 healthCheckTimeout: 600
 logLevel: info
@@ -27,7 +33,11 @@ globalTTL: 0
 macros:
   server_bin: "/app/bin/llama-server"
   kv_ctx_size: "131072"
-  chat_hf_model: "HauhauCS/Qwen3.6-27B-Uncensored-HauhauCS-Aggressive:Q5_K_P"
+  pi_chat_hf_model: "HauhauCS/Qwen3.6-27B-Uncensored-HauhauCS-Aggressive:Q5_K_P"
+  pi_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
+  qmd_chat_hf_model: "tobil/qmd-query-expansion-1.7B-gguf:Q8_0"
+  qmd_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
+  qmd_rerank_hf_model: "mradermacher/Qwen3-Reranker-8B-GGUF:Q5_K_M"
   n_predict: "8192"
   temp: "0.6"
   top_k: "20"
@@ -64,20 +74,20 @@ macros:
   reasoning_format: "auto"
   reasoning_budget: "4096"
   reasoning_budget_message: '...\ output\ your\ final\ answer\ now.'
-  emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
   emb_cache_type_k: "f16"
   emb_cache_type_v: "f16"
+  rerank_ctx_size: "4096"
 
 models:
   # Chat model
   # OpenAI-compatible completions/chat endpoint with tuned inference defaults.
   "qwen3-chat":
-    name: "Qwen3.6-27B-Uncensored-HauhauCS-Aggressive"
+    name: "Pi Qwen3 Chat 27B Turboquant"
     description: "Primary chat/completions model — turboquant KV cache enabled"
     cmd: |
       ${server_bin}
       --port ${PORT}
-      -hf ${chat_hf_model}
+      -hf ${pi_chat_hf_model}
       ${mmproj_arg}
       --ctx-size ${kv_ctx_size}
       --n-predict ${n_predict}
@@ -122,12 +132,12 @@ models:
   # Embedding model
   # Lightweight config for /v1/embeddings requests.
   "qwen3-embeddings":
-    name: "Qwen3-Embedding-8B-Q5_K_M"
+    name: "Pi Qwen3 Embeddings 8B"
     description: "Dense embedding model for vector search, RAG, similarity"
     cmd: |
       ${server_bin}
       --port ${PORT}
-      -hf ${emb_hf_model}
+      -hf ${pi_emb_hf_model}
       --ctx-size ${kv_ctx_size}
       --batch-size ${batch_size}
       --ubatch-size ${ubatch_size}
@@ -138,6 +148,103 @@ models:
       ${kv_unified}
       ${no_mmap}
       --embedding
+      ${no_warmup}
+
+    env:
+      - "HF_TOKEN=${env.HF_TOKEN}"
+
+  # QMD alias for query expansion / completions.
+  # Uses the existing chat model without changing Pi's current alias.
+  "qmd-generate":
+    name: "QMD Query Expansion"
+    description: "Alias for QMD query expansion and OpenAI-compatible completions"
+    cmd: |
+      ${server_bin}
+      --port ${PORT}
+      -hf ${qmd_chat_hf_model}
+      ${mmproj_arg}
+      --ctx-size ${kv_ctx_size}
+      --n-predict ${n_predict}
+      --temp ${temp}
+      --top-k ${top_k}
+      --top-p ${top_p}
+      --min-p ${min_p}
+      --sampler-seq ${sampler_seq}
+      --repeat-last-n ${repeat_last_n}
+      --repeat-penalty ${repeat_penalty}
+      --presence-penalty ${presence_penalty}
+      --frequency-penalty ${frequency_penalty}
+      --dry-multiplier ${dry_multiplier}
+      --dry-base ${dry_base}
+      --dry-allowed-length ${dry_allowed_length}
+      --dry-penalty-last-n ${dry_penalty_last_n}
+      --batch-size ${batch_size}
+      --ubatch-size ${ubatch_size}
+      --parallel ${parallel}
+      --fit ${fit}
+      --flash-attn ${flash_attn}
+      --cache-type-k ${cache_type_k}
+      --cache-type-v ${cache_type_v}
+      ${kv_unified}
+      ${cache_idle_slots}
+      ${backend_sampling}
+      ${web_ui_off}
+      ${no_warmup}
+      ${no_mmap}
+      --poll ${poll}
+      ${jinja_on}
+      --chat-template-file ${chat_template_file}
+      --chat-template-kwargs ${chat_template_kwargs}
+      --reasoning ${reasoning}
+      --reasoning-format ${reasoning_format}
+      --reasoning-budget ${reasoning_budget}
+      --reasoning-budget-message ${reasoning_budget_message}
+
+    env:
+      - "HF_TOKEN=${env.HF_TOKEN}"
+
+  # QMD alias for embeddings.
+  # Uses the existing embedding model without changing Pi's current alias.
+  "qmd-embed":
+    name: "QMD Embedding"
+    description: "Alias for QMD /v1/embeddings requests"
+    cmd: |
+      ${server_bin}
+      --port ${PORT}
+      -hf ${qmd_emb_hf_model}
+      --ctx-size ${kv_ctx_size}
+      --batch-size ${batch_size}
+      --ubatch-size ${ubatch_size}
+      --parallel ${parallel}
+      --flash-attn ${flash_attn}
+      --cache-type-k ${emb_cache_type_k}
+      --cache-type-v ${emb_cache_type_v}
+      ${kv_unified}
+      ${no_mmap}
+      --embedding
+      ${no_warmup}
+
+    env:
+      - "HF_TOKEN=${env.HF_TOKEN}"
+
+  # Dedicated reranker alias for QMD.
+  "qmd-rerank":
+    name: "Qwen3 Reranker 8B"
+    description: "Cross-encoder reranking model for QMD /v1/rerank requests"
+    cmd: |
+      ${server_bin}
+      --port ${PORT}
+      -hf ${qmd_rerank_hf_model}
+      --ctx-size ${rerank_ctx_size}
+      --batch-size ${batch_size}
+      --ubatch-size ${ubatch_size}
+      --parallel ${parallel}
+      --flash-attn ${flash_attn}
+      --cache-type-k ${emb_cache_type_k}
+      --cache-type-v ${emb_cache_type_v}
+      ${kv_unified}
+      ${no_mmap}
+      --reranking
       ${no_warmup}
 
     env:

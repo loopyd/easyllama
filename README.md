@@ -23,22 +23,40 @@ Single-model runtime commands were removed on purpose.
 
 ## Contents
 
-- [Overview](#overview)
-- [Recent Changes](#recent-changes)
-- [Requirements](#requirements)
-- [Quick Start](#quick-start)
-- [Architecture](#architecture)
-- [Build and Warmup Flow](#build-and-warmup-flow)
-- [Served Models and Endpoints](#served-models-and-endpoints)
-- [Command Reference](#command-reference)
-- [Configuration](#configuration)
-- [Authentication and API Keys](#authentication-and-api-keys)
-- [mmproj Integration](#mmproj-integration)
-- [API Examples](#api-examples)
-- [Runtime Behavior](#runtime-behavior)
-- [Troubleshooting](#troubleshooting)
-- [Contributing](#contributing)
-- [License](#license)
+- [easy llama(cpp)](#easy-llamacpp)
+  - [Overview](#overview)
+  - [Recent Changes](#recent-changes)
+  - [Contents](#contents)
+  - [Requirements](#requirements)
+  - [Quick Start](#quick-start)
+  - [Architecture](#architecture)
+  - [Build and Warmup Flow](#build-and-warmup-flow)
+  - [Served Models and Endpoints](#served-models-and-endpoints)
+    - [Model IDs](#model-ids)
+    - [Exposed Endpoints](#exposed-endpoints)
+  - [Command Reference](#command-reference)
+  - [Configuration](#configuration)
+    - [Core Files and Directories](#core-files-and-directories)
+    - [Common Environment Overrides](#common-environment-overrides)
+  - [Authentication and API Keys](#authentication-and-api-keys)
+    - [Hugging Face Token Precedence](#hugging-face-token-precedence)
+    - [Local API Key Precedence](#local-api-key-precedence)
+  - [mmproj Integration](#mmproj-integration)
+  - [API Examples](#api-examples)
+    - [List Models](#list-models)
+    - [Chat Completions](#chat-completions)
+    - [Embeddings](#embeddings)
+    - [Rerank](#rerank)
+  - [Runtime Behavior](#runtime-behavior)
+    - [Model Loading and Swapping](#model-loading-and-swapping)
+    - [Web UI](#web-ui)
+  - [Troubleshooting](#troubleshooting)
+  - [Contributing](#contributing)
+    - [Before You Start](#before-you-start)
+    - [Local Setup](#local-setup)
+    - [Validation](#validation)
+    - [Pull Request Checklist](#pull-request-checklist)
+  - [License](#license)
 
 ## Requirements
 
@@ -74,7 +92,7 @@ cp config.yml.example config.yml
 1. Optionally warm the models you want ready before traffic arrives.
 
 ```bash
-./run.sh warmup qwen3-chat qwen3-embeddings
+./run.sh warmup qwen3-chat qwen3-embeddings qmd-rerank
 ```
 
 1. Verify that the service is up and advertising models.
@@ -85,11 +103,14 @@ curl -sS http://127.0.0.1:8080/health
 curl -sS http://127.0.0.1:8080/v1/models | jq '.data[].id'
 ```
 
-Expected model IDs from the sample config:
+Model IDs come directly from the keys under `models:` in your config. With the active config in this workspace:
 
 ```text
 qwen3-chat
 qwen3-embeddings
+qmd-generate
+qmd-embed
+qmd-rerank
 ```
 
 ## Architecture
@@ -113,6 +134,7 @@ Client requests -> Port 8080
 ```
 
 The container runs llama-swap on the public port and spawns upstream `llama-server` processes per configured model when requests arrive.
+That upstream can be a chat model, embedding model, or a dedicated reranker depending on the model ID you request.
 
 ## Build and Warmup Flow
 
@@ -137,8 +159,11 @@ Read it as: build the turboquant image, start llama-swap, then either warm a mod
 
 | Model ID | Underlying Model | Purpose |
 | --- | --- | --- |
-| `qwen3-chat` | `HauhauCS/Qwen3.6-27B-Uncensored-HauhauCS-Aggressive:Q5_K_P` | Chat and reasoning |
-| `qwen3-embeddings` | `Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M` | Dense embeddings |
+| `qwen3-chat` | `HauhauCS/Qwen3.6-27B-Uncensored-HauhauCS-Aggressive:Q5_K_P` | Primary chat and reasoning model |
+| `qwen3-embeddings` | `Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M` | Dense embeddings for vector search and similarity |
+| `qmd-generate` | `tobil/qmd-query-expansion-1.7B-gguf:Q8_0` | QMD query expansion and OpenAI-compatible completions |
+| `qmd-embed` | `Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M` | QMD embedding alias for `/v1/embeddings` |
+| `qmd-rerank` | `mradermacher/Qwen3-Reranker-8B-GGUF:Q5_K_M` | Cross-encoder reranker for `/v1/rerank` |
 
 ### Exposed Endpoints
 
@@ -150,7 +175,10 @@ Read it as: build the turboquant image, start llama-swap, then either warm a mod
 | `POST /v1/completions` | Legacy completions |
 | `POST /v1/responses` | Responses API |
 | `POST /v1/embeddings` | Embedding generation |
+| `POST /v1/rerank` | Cross-encoder reranking |
 | `GET /ui` | Built-in llama-swap web UI |
+
+`qmd-rerank` is a reranker-only model. Use it with `/v1/rerank`, not the chat or completions routes.
 
 ## Command Reference
 
@@ -280,6 +308,23 @@ curl -X POST http://127.0.0.1:8080/v1/embeddings \
   -d '{
     "model": "qwen3-embeddings",
     "input": ["Hello world", "Another document"]
+  }'
+```
+
+### Rerank
+
+```bash
+curl -X POST http://127.0.0.1:8080/v1/rerank \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qmd-rerank",
+    "query": "best local reranker for QMD search",
+    "top_n": 2,
+    "documents": [
+      "Qwen3 Reranker 8B is a cross-encoder reranker served through /v1/rerank.",
+      "Qwen3 Embeddings 8B creates vectors for retrieval, not pairwise reranking.",
+      "QMD Query Expansion rewrites search prompts before retrieval and reranking."
+    ]
   }'
 ```
 
