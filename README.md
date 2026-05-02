@@ -8,16 +8,27 @@ Single-model runtime commands were removed on purpose.
 
 ## Overview
 
-- Build from the llama.cpp repo/ref you choose.
-- Run a single swap container named `llamacpp-server-swap`.
-- Keep credentials in `auth.json` and mount runtime assets from `models/`, `mmproj/`, and `chat_template/`.
-- Serve chat and embedding models from one config file on `http://127.0.0.1:8080` by default.
+- Build a CUDA image from TheTom's turboquant llama.cpp fork by default.
+- Run one llama-swap container named `llamacpp-server-swap`.
+- Keep runtime credentials in `auth.json` and host assets in `models/`, `mmproj/`, and `chat_template/`.
+- Serve multiple model IDs from one config file on `http://127.0.0.1:8080` by default.
+- Warm models explicitly with `./run.sh warmup` when you want downloads and first loads to happen before user traffic.
+
+## Recent Changes
+
+- `./run.sh build` now defaults to `TheTom/llama-cpp-turboquant@feature/turboquant-kv-cache`.
+- `./run.sh warmup [model...]` loads models through llama-swap's upstream health route.
+- Hugging Face `-hf` model downloads are still lazy; `./run.sh start` only brings up the runtime.
+- The same warmup command works from host mode and from the container entrypoint.
 
 ## Contents
 
+- [Overview](#overview)
+- [Recent Changes](#recent-changes)
 - [Requirements](#requirements)
 - [Quick Start](#quick-start)
 - [Architecture](#architecture)
+- [Build and Warmup Flow](#build-and-warmup-flow)
 - [Served Models and Endpoints](#served-models-and-endpoints)
 - [Command Reference](#command-reference)
 - [Configuration](#configuration)
@@ -44,7 +55,7 @@ Single-model runtime commands were removed on purpose.
 ./run.sh build
 ```
 
-By default this builds `ggml-org/llama.cpp@master`. Override that with `LLAMACPP_LLAMA_CPP_REPO` and `LLAMACPP_LLAMA_CPP_REF` if you need a different fork or branch.
+By default this builds `TheTom/llama-cpp-turboquant@feature/turboquant-kv-cache`. Override that with `LLAMACPP_LLAMA_CPP_REPO` and `LLAMACPP_LLAMA_CPP_REF` if you need a different fork or branch.
 
 If you want a local editable runtime config, copy the tracked example first:
 
@@ -56,6 +67,14 @@ cp config.yml.example config.yml
 
 ```bash
 ./run.sh start
+```
+
+`./run.sh start` advertises configured model IDs but does not pre-download every `-hf` model into `models/`.
+
+1. Optionally warm the models you want ready before traffic arrives.
+
+```bash
+./run.sh warmup qwen3-chat qwen3-embeddings
 ```
 
 1. Verify that the service is up and advertising models.
@@ -95,6 +114,23 @@ Client requests -> Port 8080
 
 The container runs llama-swap on the public port and spawns upstream `llama-server` processes per configured model when requests arrive.
 
+## Build and Warmup Flow
+
+```mermaid
+flowchart LR
+  A[./run.sh build] --> B[Build turboquant-enabled image]
+  B --> C[./run.sh start]
+  C --> D[llama-swap starts and exposes /v1/models]
+  D --> E{Warmup or first request?}
+  E -->|./run.sh warmup| F[GET /upstream/<model>/health]
+  E -->|POST /v1/*| F
+  F --> G[Download -hf weights if missing]
+  G --> H[Start model upstream]
+  H --> I[Model ready for traffic]
+```
+
+Read it as: build the turboquant image, start llama-swap, then either warm a model explicitly or let the first authenticated request trigger the same load path.
+
 ## Served Models and Endpoints
 
 ### Model IDs
@@ -122,6 +158,7 @@ The container runs llama-swap on the public port and spawns upstream `llama-serv
 | --- | --- | --- |
 | `./run.sh build` | host | Build the local CUDA image from the Dockerfile |
 | `./run.sh start` | host | Start the llama-swap container |
+| `./run.sh warmup [model...]` | host or container | Load configured models through llama-swap's internal upstream route without waiting for a user inference request |
 | `./run.sh stop` | host | Stop and remove the container |
 | `./run.sh restart` | host | Restart the runtime |
 | `./run.sh status` | host | Show container status |
@@ -130,7 +167,7 @@ The container runs llama-swap on the public port and spawns upstream `llama-serv
 | `./run.sh help` | host | Show supported commands and env vars |
 | `./run.sh serve` | container | Run llama-swap directly as the image entrypoint |
 
-For normal host usage, `build`, `start`, `status`, `logs`, `restart`, and `stop` are the commands that matter day to day.
+For normal host usage, `build`, `start`, `warmup`, `status`, `logs`, `restart`, and `stop` are the commands that matter day to day.
 
 ## Configuration
 
@@ -252,6 +289,15 @@ curl -X POST http://127.0.0.1:8080/v1/embeddings \
 
 By default llama-swap runs one upstream model at a time.
 
+The key runtime rules are simple:
+
+- Entries under `models:` are registered at startup, but `-hf ...` assets are downloaded lazily on first use.
+- `./run.sh warmup` forces that first load early by calling `GET /upstream/<model>/health` through llama-swap.
+- With no arguments, warmup uses the model IDs returned by `/v1/models`; with arguments, it warms only the named IDs.
+- If you want preloading at startup instead of an explicit command, use `hooks.on_startup.preload` in `config.yml`.
+
+If you preload multiple models at once, put them in the same concurrent group or matrix set or they will swap each other out during startup.
+
 1. If no model is loaded, the requested model starts immediately.
 1. If another model is loaded, llama-swap unloads it and starts the requested one.
 1. Waiting requests queue until the requested model is ready.
@@ -289,11 +335,13 @@ It provides:
 | Symptom | Likely Cause | Fix |
 | --- | --- | --- |
 | `/app/bin/llama-swap` missing | The image was built before llama-swap support was present or the image is stale | Run `./run.sh clean && ./run.sh build` |
+| Configured models are not downloaded after `./run.sh start` | Model downloads are lazy and only begin on the first authenticated request for that model | Run `./run.sh warmup [model...]` or send an authorized request to the target `/v1/*` route, then watch `models/` or `./run.sh logs` for the initial cache population |
+| `/v1/models` returns `401` | An API key is configured via `auth.json`, `LLAMACPP_AUTH_FILE`, `LLAMACPP_API_KEY`, or `API_KEY` | Retry with `Authorization: Bearer <api_key>` or `x-api-key: <api_key>` |
 | First embeddings request is slow | The embedding model is being downloaded on first use | Watch `./run.sh logs` and wait for the initial cache to populate |
 | Port `8080` is busy | Another process is already bound to the host port | Start with `LLAMACPP_HOST_PORT=8090 ./run.sh start` |
-| `turbo4` cache types fail | The selected llama.cpp repo/ref does not support those cache types | Build a compatible fork or change the cache settings in `config.yml` |
+| `turbo4` cache types fail | The selected llama.cpp repo/ref does not support those cache types | Build with the default turboquant fork or change the cache settings in `config.yml` |
 
-Example turbo-cache-compatible rebuild:
+Example rebuild with the default turbo-cache-compatible fork:
 
 ```bash
 LLAMACPP_LLAMA_CPP_REPO=https://github.com/TheTom/llama-cpp-turboquant.git \

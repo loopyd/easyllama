@@ -11,6 +11,8 @@
 # - cp config.yml.example config.yml
 # - ./run.sh start
 # - curl http://localhost:8080/v1/models
+# - model downloads begin on first authenticated use, not during container startup
+# - optional: ./run.sh warmup qwen3-chat qwen3-embeddings
 #
 # Primary API routes:
 # - POST /v1/chat/completions with model=qwen3-chat

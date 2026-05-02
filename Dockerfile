@@ -23,8 +23,8 @@ ARG DEBIAN_FRONTEND=noninteractive
 ARG HOST_TZ=UTC
 ARG HOST_LANG=C.UTF-8
 ARG HOST_LC_ALL=C.UTF-8
-ARG LLAMA_CPP_REPO=https://github.com/ggml-org/llama.cpp.git
-ARG LLAMA_CPP_REF=master
+ARG LLAMA_CPP_REPO=https://github.com/TheTom/llama-cpp-turboquant.git
+ARG LLAMA_CPP_REF=feature/turboquant-kv-cache
 # Fallback only; run.sh auto-detects host GPU compute capability and overrides this.
 ARG CMAKE_CUDA_ARCHITECTURES=120
 ENV CUDA_STUBS=/usr/local/cuda/lib64/stubs
