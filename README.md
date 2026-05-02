@@ -4,59 +4,30 @@ GPU-focused multi-model llama.cpp runner with llama-swap as the only runtime ent
 
 > Primary workflow: build one CUDA image, start one llama-swap container, and serve multiple model IDs from `config.yml` through OpenAI-compatible endpoints.
 
-Single-model runtime commands were removed on purpose.
-
 ## Overview
 
-- Build a CUDA image from TheTom's turboquant llama.cpp fork by default.
-- Run one llama-swap container named `llamacpp-server-swap`.
-- Keep runtime credentials in `auth.json` and host assets in `models/`, `mmproj/`, and `chat_template/`.
-- Serve multiple model IDs from one config file on `http://127.0.0.1:8080` by default.
+- Build one CUDA image from llama.cpp, then run one llama-swap container.
+- Keep credentials in `auth.json` and host assets in `models/`, `mmproj/`, and `chat_template/`.
+- Serve chat, embedding, completion, and rerank routes from one config file on `http://127.0.0.1:8080` by default.
 - Warm models explicitly with `./run.sh warmup` when you want downloads and first loads to happen before user traffic.
-
-## Recent Changes
-
-- `./run.sh build` now defaults to `TheTom/llama-cpp-turboquant@feature/turboquant-kv-cache`.
-- `./run.sh warmup [model...]` loads models through llama-swap's upstream health route.
-- Hugging Face `-hf` model downloads are still lazy; `./run.sh start` only brings up the runtime.
-- The same warmup command works from host mode and from the container entrypoint.
 
 ## Contents
 
-- [easy llama(cpp)](#easy-llamacpp)
-  - [Overview](#overview)
-  - [Recent Changes](#recent-changes)
-  - [Contents](#contents)
-  - [Requirements](#requirements)
-  - [Quick Start](#quick-start)
-  - [Architecture](#architecture)
-  - [Build and Warmup Flow](#build-and-warmup-flow)
-  - [Served Models and Endpoints](#served-models-and-endpoints)
-    - [Model IDs](#model-ids)
-    - [Exposed Endpoints](#exposed-endpoints)
-  - [Command Reference](#command-reference)
-  - [Configuration](#configuration)
-    - [Core Files and Directories](#core-files-and-directories)
-    - [Common Environment Overrides](#common-environment-overrides)
-  - [Authentication and API Keys](#authentication-and-api-keys)
-    - [Hugging Face Token Precedence](#hugging-face-token-precedence)
-    - [Local API Key Precedence](#local-api-key-precedence)
-  - [mmproj Integration](#mmproj-integration)
-  - [API Examples](#api-examples)
-    - [List Models](#list-models)
-    - [Chat Completions](#chat-completions)
-    - [Embeddings](#embeddings)
-    - [Rerank](#rerank)
-  - [Runtime Behavior](#runtime-behavior)
-    - [Model Loading and Swapping](#model-loading-and-swapping)
-    - [Web UI](#web-ui)
-  - [Troubleshooting](#troubleshooting)
-  - [Contributing](#contributing)
-    - [Before You Start](#before-you-start)
-    - [Local Setup](#local-setup)
-    - [Validation](#validation)
-    - [Pull Request Checklist](#pull-request-checklist)
-  - [License](#license)
+- [Overview](#overview)
+- [Requirements](#requirements)
+- [Quick Start](#quick-start)
+- [Architecture](#architecture)
+- [Build and Warmup Flow](#build-and-warmup-flow)
+- [Served Models and Endpoints](#served-models-and-endpoints)
+- [Command Reference](#command-reference)
+- [Configuration](#configuration)
+- [Authentication and API Keys](#authentication-and-api-keys)
+- [mmproj Integration](#mmproj-integration)
+- [API Examples](#api-examples)
+- [Runtime Behavior](#runtime-behavior)
+- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Requirements
 
@@ -103,7 +74,7 @@ curl -sS http://127.0.0.1:8080/health
 curl -sS http://127.0.0.1:8080/v1/models | jq '.data[].id'
 ```
 
-Model IDs come directly from the keys under `models:` in your config. With the active config in this workspace:
+The tracked example config exposes these model IDs:
 
 ```text
 qwen3-chat
@@ -123,14 +94,13 @@ Client requests -> Port 8080
              | proxy      |
              +-----+------+
                    |
-         +---------+---------+
-         |                   |
-         v                   v
-   +------------+      +------------+
-   | llama-     |      | llama-     |
-   | server     |      | server     |
-   | qwen3-chat |      | embeddings |
-   +------------+      +------------+
+  +------------+------------+
+  |            |            |
+  v            v            v
+ +-----------+ +-----------+ +-----------+
+ | chat or   | | embedding | | reranker  |
+ | completion| | model     | | model     |
+ +-----------+ +-----------+ +-----------+
 ```
 
 The container runs llama-swap on the public port and spawns upstream `llama-server` processes per configured model when requests arrive.
