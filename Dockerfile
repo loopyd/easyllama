@@ -27,6 +27,8 @@ ARG LLAMA_CPP_REPO=https://github.com/Luce-Org/llama.cpp.git
 ARG LLAMA_CPP_REF=luce-dflash
 ARG TURBOQUANT_LLAMA_CPP_REPO=https://github.com/TheTom/llama-cpp-turboquant.git
 ARG TURBOQUANT_LLAMA_CPP_REF=feature/turboquant-kv-cache
+ARG SPIRITBUUN_LLAMA_CPP_REPO=https://github.com/spiritbuun/buun-llama-cpp.git
+ARG SPIRITBUUN_LLAMA_CPP_REF=master
 ARG LUCEBOX_HUB_REPO=https://github.com/Luce-Org/lucebox-hub.git
 ARG LUCEBOX_HUB_REF=main
 # Fallback only; run.sh auto-detects host GPU compute capability and overrides this.
@@ -224,6 +226,44 @@ COPY --from=turboquant-builder /src/llama.cpp-turboquant/models/templates/ /opt/
 RUN mkdir -p /app/bin \
     && ln -sf /opt/llama.cpp-turboquant/bin/llama-server /app/bin/llama-server-turboquant
 ENV LD_LIBRARY_PATH=/opt/llama.cpp-turboquant/bin:/usr/local/cuda/lib64
+
+FROM builder-base AS spiritbuun-builder
+ARG BUILD_MODE=basic
+ARG SPIRITBUUN_LLAMA_CPP_REPO=https://github.com/spiritbuun/buun-llama-cpp.git
+ARG SPIRITBUUN_LLAMA_CPP_REF=master
+ARG CMAKE_CUDA_ARCHITECTURES=120
+RUN --mount=type=cache,id=llamacpp-ccache,target=/root/.cache/ccache,sharing=locked \
+    if [ "${BUILD_MODE}" = "spiritbuun" ]; then \
+        git clone --depth 1 --branch "${SPIRITBUUN_LLAMA_CPP_REF}" "${SPIRITBUUN_LLAMA_CPP_REPO}" /src/llama.cpp-spiritbuun \
+        && cd /src/llama.cpp-spiritbuun \
+        && cmake -B build \
+        -DGGML_CUDA=ON \
+        -DCMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES}" \
+        -DGGML_CUDA_FA=ON \
+        -DGGML_CUDA_FA_ALL_QUANTS=ON \
+        -DGGML_NATIVE=OFF \
+        -DLLAMA_BUILD_SERVER=ON \
+        -DLLAMA_OPENSSL=ON \
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+        -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath-link,${CUDA_STUBS}" \
+        -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-rpath-link,${CUDA_STUBS}" \
+        -DCMAKE_BUILD_TYPE=Release \
+        && cmake --build build --config Release -j"$(nproc)" --target llama-server \
+        && ccache --show-stats; \
+    else \
+        mkdir -p /src/llama.cpp-spiritbuun/build/bin /src/llama.cpp-spiritbuun/gguf-py /src/llama.cpp-spiritbuun/models/templates \
+        && : > /src/llama.cpp-spiritbuun/convert_hf_to_gguf.py; \
+    fi
+
+FROM runtime-base AS runtime-spiritbuun
+COPY --from=spiritbuun-builder /src/llama.cpp-spiritbuun/build/bin/ /opt/llama.cpp-spiritbuun/bin/
+COPY --from=spiritbuun-builder /src/llama.cpp-spiritbuun/convert_hf_to_gguf.py /opt/llama.cpp/convert_hf_to_gguf.py
+COPY --from=spiritbuun-builder /src/llama.cpp-spiritbuun/gguf-py/ /opt/llama.cpp/gguf-py/
+COPY --from=spiritbuun-builder /src/llama.cpp-spiritbuun/models/templates/ /opt/llama.cpp/models/templates/
+RUN mkdir -p /app/bin \
+    && ln -sf /opt/llama.cpp-spiritbuun/bin/llama-server /app/bin/llama-server-spiritbuun
+ENV LD_LIBRARY_PATH=/opt/llama.cpp-spiritbuun/bin:/usr/local/cuda/lib64
 
 FROM builder-base AS lucebox-builder
 ARG BUILD_MODE=basic

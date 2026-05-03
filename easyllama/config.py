@@ -19,8 +19,9 @@ RUNTIME_HOST = "host"
 RUNTIME_CONTAINER = "container"
 MODE_BASIC = "basic"
 MODE_TURBOQUANT = "turboquant"
+MODE_SPIRITBUUN = "spiritbuun"
 MODE_LUCEBOX = "lucebox"
-VALID_MODES = {MODE_BASIC, MODE_TURBOQUANT, MODE_LUCEBOX}
+VALID_MODES = {MODE_BASIC, MODE_TURBOQUANT, MODE_SPIRITBUUN, MODE_LUCEBOX}
 MODELS_DIR_CONTAINER = "/root/.cache/huggingface/hub"
 CHAT_TEMPLATE_DIR_CONTAINER = "/chat_template"
 MMPROJ_DIR_CONTAINER = "/mmproj"
@@ -63,6 +64,8 @@ class Settings:
     llama_cpp_ref: str
     turboquant_llama_cpp_repo: str
     turboquant_llama_cpp_ref: str
+    spiritbuun_llama_cpp_repo: str
+    spiritbuun_llama_cpp_ref: str
     lucebox_hub_repo: str
     lucebox_hub_ref: str
     host_tz: str
@@ -92,7 +95,7 @@ def load_pyproject(root_dir: Path) -> tuple[dict[str, object], dict[str, object]
 def normalize_mode(value: str | None) -> str:
     selected = (value or MODE_BASIC).strip().lower()
     if selected not in VALID_MODES:
-        allowed = ", ".join((MODE_BASIC, MODE_TURBOQUANT, MODE_LUCEBOX))
+        allowed = ", ".join((MODE_BASIC, MODE_TURBOQUANT, MODE_SPIRITBUUN, MODE_LUCEBOX))
         raise SystemExit(f"unsupported mode: {selected}; allowed: {allowed}")
     return selected
 
@@ -171,6 +174,10 @@ def load_settings(
             active=absolute_path(root_dir, str(config_defaults[MODE_TURBOQUANT])),
             example=absolute_path(root_dir, str(config_defaults["turboquant_example"])),
         ),
+        MODE_SPIRITBUUN: ModeConfig(
+            active=absolute_path(root_dir, str(config_defaults[MODE_SPIRITBUUN])),
+            example=absolute_path(root_dir, str(config_defaults["spiritbuun_example"])),
+        ),
         MODE_LUCEBOX: ModeConfig(
             active=absolute_path(root_dir, str(config_defaults[MODE_LUCEBOX])),
             example=absolute_path(root_dir, str(config_defaults["lucebox_example"])),
@@ -216,6 +223,14 @@ def load_settings(
         turboquant_llama_cpp_ref=os.environ.get(
             "LLAMACPP_TURBOQUANT_LLAMA_CPP_REF",
             str(defaults["turboquant_llama_cpp_ref"]),
+        ),
+        spiritbuun_llama_cpp_repo=os.environ.get(
+            "LLAMACPP_SPIRITBUUN_LLAMA_CPP_REPO",
+            str(defaults["spiritbuun_llama_cpp_repo"]),
+        ),
+        spiritbuun_llama_cpp_ref=os.environ.get(
+            "LLAMACPP_SPIRITBUUN_LLAMA_CPP_REF",
+            str(defaults["spiritbuun_llama_cpp_ref"]),
         ),
         lucebox_hub_repo=os.environ.get(
             "LLAMACPP_LUCEBOX_HUB_REPO", str(defaults["lucebox_hub_repo"])

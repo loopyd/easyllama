@@ -93,8 +93,7 @@ class ChatRequestBudgetMiddleware:
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         if (
-            self.extra_tokens <= 0
-            or scope.get("type") != "http"
+            scope.get("type") != "http"
             or scope.get("method") != "POST"
             or scope.get("path") != "/v1/chat/completions"
         ):
@@ -128,20 +127,33 @@ class ChatRequestBudgetMiddleware:
             await self.app(scope, self._wrap_receive(body, receive), send)
             return
 
-        max_tokens = payload.get("max_tokens")
-        if not isinstance(max_tokens, int) or max_tokens <= 0:
-            alt_max_tokens = payload.get("max_completion_tokens")
-            if isinstance(alt_max_tokens, int) and alt_max_tokens > 0:
-                max_tokens = alt_max_tokens
-            else:
-                max_tokens = FALLBACK_CHAT_MAX_TOKENS
-
+        payload_changed = False
         kwargs = payload.get("chat_template_kwargs")
-        if isinstance(kwargs, dict) and kwargs.get("enable_thinking") is False:
+        normalized_kwargs = dict(kwargs) if isinstance(kwargs, dict) else {}
+        if normalized_kwargs.get("enable_thinking") is not False:
+            normalized_kwargs["enable_thinking"] = False
+            payload_changed = True
+        if normalized_kwargs.get("preserve_thinking") is not False:
+            normalized_kwargs["preserve_thinking"] = False
+            payload_changed = True
+        payload["chat_template_kwargs"] = normalized_kwargs
+
+        if self.extra_tokens > 0:
+            max_tokens = payload.get("max_tokens")
+            if not isinstance(max_tokens, int) or max_tokens <= 0:
+                alt_max_tokens = payload.get("max_completion_tokens")
+                if isinstance(alt_max_tokens, int) and alt_max_tokens > 0:
+                    max_tokens = alt_max_tokens
+                else:
+                    max_tokens = FALLBACK_CHAT_MAX_TOKENS
+
+            payload["max_tokens"] = max_tokens + self.extra_tokens
+            payload_changed = True
+
+        if not payload_changed:
             await self.app(scope, self._wrap_receive(body, receive), send)
             return
 
-        payload["max_tokens"] = max_tokens + self.extra_tokens
         new_body = json.dumps(payload).encode("utf-8")
         new_scope = dict(scope)
         new_headers = [
@@ -155,7 +167,7 @@ class ChatRequestBudgetMiddleware:
 
 
 def install_chat_request_budget_middleware(app: Any, extra_tokens: int) -> None:
-    if extra_tokens <= 0 or getattr(app, "_easyllama_chat_request_budget_middleware", False):
+    if getattr(app, "_easyllama_chat_request_budget_middleware", False):
         return
     app.add_middleware(ChatRequestBudgetMiddleware, extra_tokens=extra_tokens)
     app._easyllama_chat_request_budget_middleware = True

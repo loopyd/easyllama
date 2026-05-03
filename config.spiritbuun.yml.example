@@ -1,8 +1,8 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/mostlygeek/llama-swap/refs/heads/main/config-schema.json
 #
-# Copy this file to config.lucebox.yml for local edits and overrides.
-# Use this mode with ./run.sh --mode lucebox start when you want Luce
-# dflash+pflash for qwen3-chat and plain llama-server for the other models.
+# Copy this file to config.spiritbuun.yml for local edits and overrides.
+# Use this mode with ./run.sh --mode spiritbuun start when you want the
+# spiritbuun/buun-llama-cpp qwen3-chat path with a published DFlash GGUF draft.
 
 healthCheckTimeout: 1800
 logLevel: info
@@ -12,14 +12,17 @@ globalTTL: 0
 # Shared llama-server argument macros
 macros:
   server_bin: "/opt/venv/bin/easyllama"
-  llama_server_bin: "/app/bin/llama-server-basic"
+  llama_server_bin: "/app/bin/llama-server-spiritbuun"
   kv_ctx_size: "131072"
+  qwen3_chat_target_hf: "unsloth/Qwen3.6-27B-GGUF:Q5_K_M"
+  qwen3_chat_draft_hf: "Ardenzard/Qwen3.6-27B-DFlash-GGUF:Qwen3.6-27B-DFlash-Q5_K_M.gguf"
   pi_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
   qmd_chat_hf_model: "tobil/qmd-query-expansion-1.7B-gguf:Q8_0"
   qmd_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
   qmd_rerank_hf_model: "mradermacher/Qwen3-Reranker-8B-GGUF:Q5_K_M"
   n_predict: "8192"
   temp: "0.6"
+  chat_temp: "0.2"
   top_k: "20"
   top_p: "0.95"
   min_p: "0.0"
@@ -34,15 +37,17 @@ macros:
   dry_penalty_last_n: "2048"
   batch_size: "1024"
   ubatch_size: "256"
+  chat_batch_size: "256"
+  chat_ubatch_size: "64"
   parallel: "1"
   flash_attn: "on"
   fit: "on"
-  cache_type_k: "q4_0"
-  cache_type_v: "q8_0"
+  cache_type_k: "turbo4"
+  cache_type_v: "turbo4"
   poll: "1"
   no_mmap: "--no-mmap"
   kv_unified: "--kv-unified"
-  cache_idle_slots: ""
+  cache_idle_slots: "--cache-idle-slots"
   backend_sampling: "--backend-sampling"
   web_ui_off: "--no-webui"
   jinja_on: "--jinja"
@@ -50,7 +55,9 @@ macros:
   mmproj_arg: "${env.LLAMACPP_MMPROJ_ARG}"
   chat_template_file: "/chat_template/qwen3.6.jinja"
   chat_template_kwargs: '{\"tokenize\":false,\"add_generation_prompt\":true,\"preserve_thinking\":true}'
+  qwen3_chat_template_kwargs: '{\"enable_thinking\":false,\"preserve_thinking\":false}'
   reasoning: "on"
+  qwen3_chat_reasoning: "off"
   reasoning_format: "auto"
   reasoning_budget: "4096"
   reasoning_budget_message: '...\ output\ your\ final\ answer\ now.'
@@ -59,49 +66,47 @@ macros:
   rerank_batch_size: "2048"
   rerank_ubatch_size: "2048"
   rerank_ctx_size: "4096"
-  qwen3_chat_target_hf: "unsloth/Qwen3.6-27B-GGUF:Q4_K_M"
-  qwen3_chat_draft_hf: "KingsonHO/Qwen3.6-27B-DFlash:model.safetensors"
-  qwen3_chat_prefill_drafter_hf: "unsloth/Qwen3-0.6B-GGUF:Qwen3-0.6B-BF16.gguf"
-  qwen3_chat_tokenizer: "Qwen/Qwen3.6-27B"
-  qwen3_chat_prefill_drafter_tokenizer: "Qwen/Qwen3-0.6B"
-  dflash_pflash_use_bsa: "1"
-  dflash_pflash_alpha: "0.85"
-  dflash_pflash_profile: ""
-  dflash_budget: "22"
-  dflash_thinking_budget_extra: "2048"
-  dflash_max_ctx: "131072"
-  dflash_fa_window: "0"
-  dflash_prefill_compression: "auto"
-  dflash_prefill_threshold: "32000"
-  dflash_prefill_keep_ratio: "0.05"
-  dflash_cache_args: ""
+  qwen3_chat_draft_context: "256"
+  qwen3_chat_draft_max: "8"
+  qwen3_chat_draft_min: "1"
+  qwen3_chat_draft_p_min: "0.75"
+  qwen3_chat_draft_cache_type_k: "f16"
+  qwen3_chat_draft_cache_type_v: "f16"
+  qwen3_chat_draft_gpu_layers: "all"
 
 models:
   "qwen3-chat":
-    name: "Pi Qwen3 Chat"
-    description: "Primary Luce dflash+pflash chat/messages model with SSE"
+    name: "Pi Qwen3 Chat 27B Spiritbuun"
+    description: "Primary chat/completions model using spiritbuun dflash with a published GGUF draft"
     cmd: |
       ${server_bin}
       server
-      lucebox
+      spiritbuun
+      --bin ${llama_server_bin}
       --port ${PORT}
-      --model-name qwen3-chat
       --target-hf ${qwen3_chat_target_hf}
       --draft-hf ${qwen3_chat_draft_hf}
-      --budget ${dflash_budget}
-      --thinking-budget-extra ${dflash_thinking_budget_extra}
-      --max-ctx ${dflash_max_ctx}
-      ${dflash_cache_args}
-      --fa-window ${dflash_fa_window}
-      --tokenizer ${qwen3_chat_tokenizer}
-      --prefill-compression ${dflash_prefill_compression}
-      --prefill-threshold ${dflash_prefill_threshold}
-      --prefill-keep-ratio ${dflash_prefill_keep_ratio}
-      --prefill-drafter-hf ${qwen3_chat_prefill_drafter_hf}
-      --prefill-drafter-tokenizer ${qwen3_chat_prefill_drafter_tokenizer}
-      --pflash-use-bsa ${dflash_pflash_use_bsa}
-      --pflash-alpha ${dflash_pflash_alpha}
-      ${dflash_pflash_profile}
+      --ctx-size ${kv_ctx_size}
+      --n-predict ${n_predict}
+      --temp ${chat_temp}
+      --batch-size ${chat_batch_size}
+      --ubatch-size ${chat_ubatch_size}
+      --parallel ${parallel}
+      --flash-attn ${flash_attn}
+      --cache-type-k ${cache_type_k}
+      --cache-type-v ${cache_type_v}
+      --cache-type-k-draft ${qwen3_chat_draft_cache_type_k}
+      --cache-type-v-draft ${qwen3_chat_draft_cache_type_v}
+      --gpu-layers-draft ${qwen3_chat_draft_gpu_layers}
+      ${web_ui_off}
+      ${no_warmup}
+      ${no_mmap}
+      --chat-template-kwargs ${qwen3_chat_template_kwargs}
+      --reasoning ${qwen3_chat_reasoning}
+      -cd ${qwen3_chat_draft_context}
+      --draft-max ${qwen3_chat_draft_max}
+      --draft-min ${qwen3_chat_draft_min}
+      --draft-p-min ${qwen3_chat_draft_p_min}
 
     env:
       - "HF_TOKEN=${env.HF_TOKEN}"

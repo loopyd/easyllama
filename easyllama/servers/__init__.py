@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from .basic import BasicServer
 from .lucebox import LuceboxServer
 from .server_base import ServerBase, Spec
+from .spiritbuun import SpiritbuunServer
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,6 +17,7 @@ class ServerDef:
 _SERVERS: dict[str, type[ServerBase]] = {
     BasicServer.name: BasicServer,
     LuceboxServer.name: LuceboxServer,
+    SpiritbuunServer.name: SpiritbuunServer,
 }
 
 

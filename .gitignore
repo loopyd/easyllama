@@ -2,9 +2,11 @@
 auth.json
 config.basic.yml
 config.turboquant.yml
+config.spiritbuun.yml
 config.lucebox.yml
 !config.basic.yml.example
 !config.turboquant.yml.example
+!config.spiritbuun.yml.example
 !config.lucebox.yml.example
 
 # Environment files

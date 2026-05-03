@@ -17,6 +17,7 @@ from .config import (
     MMPROJ_DIR_CONTAINER,
     MODE_BASIC,
     MODE_LUCEBOX,
+    MODE_SPIRITBUUN,
     MODE_TURBOQUANT,
     MODELS_DIR_CONTAINER,
     RUNTIME_CONTAINER,
@@ -35,6 +36,7 @@ LOGGER = get_logger(__name__)
 DOCKER_TARGETS = {
     MODE_BASIC: "runtime-basic",
     MODE_TURBOQUANT: "runtime-turboquant",
+    MODE_SPIRITBUUN: "runtime-spiritbuun",
     MODE_LUCEBOX: "runtime-lucebox",
 }
 
@@ -50,6 +52,12 @@ def _build_summary(settings: Settings, target: str) -> str:
             f"building {settings.image_name} (mode={settings.mode} target={target} "
             "turboquant="
             f"{settings.turboquant_llama_cpp_repo}@{settings.turboquant_llama_cpp_ref})"
+        )
+    if settings.mode == MODE_SPIRITBUUN:
+        return (
+            f"building {settings.image_name} (mode={settings.mode} target={target} "
+            "spiritbuun="
+            f"{settings.spiritbuun_llama_cpp_repo}@{settings.spiritbuun_llama_cpp_ref})"
         )
     return (
         f"building {settings.image_name} (mode={settings.mode} target={target} "
@@ -313,6 +321,8 @@ class DockerRuntime:
             "LLAMA_CPP_REF": self.settings.llama_cpp_ref,
             "TURBOQUANT_LLAMA_CPP_REPO": self.settings.turboquant_llama_cpp_repo,
             "TURBOQUANT_LLAMA_CPP_REF": self.settings.turboquant_llama_cpp_ref,
+            "SPIRITBUUN_LLAMA_CPP_REPO": self.settings.spiritbuun_llama_cpp_repo,
+            "SPIRITBUUN_LLAMA_CPP_REF": self.settings.spiritbuun_llama_cpp_ref,
             "LUCEBOX_HUB_REPO": self.settings.lucebox_hub_repo,
             "LUCEBOX_HUB_REF": self.settings.lucebox_hub_ref,
             "CMAKE_CUDA_ARCHITECTURES": compute_cuda_architectures(self.settings),
@@ -460,7 +470,7 @@ class DockerRuntime:
                 container.image.tags[0] if container.image.tags else "<untagged>",
             )
         available_images = []
-        for mode in (MODE_BASIC, MODE_TURBOQUANT, MODE_LUCEBOX):
+        for mode in (MODE_BASIC, MODE_TURBOQUANT, MODE_SPIRITBUUN, MODE_LUCEBOX):
             mode_settings = self.settings.with_mode(mode)
             if self.image_exists(mode_settings.image_name):
                 available_images.append(mode_settings.image_name)
@@ -477,7 +487,7 @@ class DockerRuntime:
         if all_images:
             image_names = [
                 self.settings.with_mode(mode).image_name
-                for mode in (MODE_BASIC, MODE_TURBOQUANT, MODE_LUCEBOX)
+                for mode in (MODE_BASIC, MODE_TURBOQUANT, MODE_SPIRITBUUN, MODE_LUCEBOX)
             ]
         for image_name in image_names:
             try:

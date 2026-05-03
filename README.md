@@ -1,15 +1,12 @@
 # easy llama(cpp)
 
-Local GPU runner for llama.cpp, turboquant, and Luce dflash/pflash with one public entrypoint: `llama-swap` on `http://127.0.0.1:8080`.
+Local GPU runner for llama.cpp, turboquant, Spiritbuun dflash, and Luce dflash/pflash with one public entrypoint: `llama-swap` on `http://127.0.0.1:8080`.
 
-`run.sh` is still the command users touch. Under the hood it dispatches to the `easyllama` Python package, builds a mode-specific CUDA image, and starts one `llama-swap` container that keeps the public API stable while swapping backend implementations underneath.
+`run.sh` is the single entrypoint for building, starting, warming, and managing the selected mode.
 
 ## Table of Contents
 
 - [Overview](#overview)
-- [Release Highlights](#release-highlights)
-- [Upgrade Notes](#upgrade-notes)
-- [Runtime Layout](#runtime-layout)
 - [Modes](#modes)
 - [Requirements](#requirements)
 - [Quick Start](#quick-start)
@@ -23,10 +20,11 @@ Local GPU runner for llama.cpp, turboquant, and Luce dflash/pflash with one publ
 
 ## Overview
 
-easy llama(cpp) gives you one host workflow for three serving styles:
+easy llama(cpp) gives you one host workflow for four serving styles:
 
 - `basic`: plain `llama-server`
 - `turboquant`: turboquant-enabled `llama-server`
+- `spiritbuun`: buun-llama-cpp with a GGUF DFlash draft for `qwen3-chat`
 - `lucebox`: Luce dflash/pflash for `qwen3-chat`, plain `llama-server` for the other models
 
 What stays the same in every mode:
@@ -40,49 +38,22 @@ What stays the same in every mode:
 
 Downloads are lazy by default. The first request for a model will fetch weights if they are not already present in `models/`. If you want predictable first-request latency, warm the models explicitly before you send traffic.
 
-## Release Highlights
-
-- The runtime is now a real Python package under `easyllama/`, with `run.sh` kept as the single user-facing entrypoint.
-- Builds are mode-specific and BuildKit-backed, so `basic` no longer drags in turboquant or Lucebox artifacts.
-- The repo now ships one config template per mode instead of one overloaded `config.yml.example`.
-- The current default configs were smoke-tested end to end.
-- `basic` was validated on `GET /health`, `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/completions`, `POST /v1/responses`, `POST /v1/embeddings`, and `POST /v1/rerank`.
-- `turboquant` was validated on the same routes as `basic`.
-- `lucebox` was validated on the same routes plus `POST /v1/messages`.
-
-## Upgrade Notes
-
-- `config.yml.example` has been replaced by `config.basic.yml.example`, `config.turboquant.yml.example`, and `config.lucebox.yml.example`.
-- `./run.sh` still works as the top-level entrypoint, but it now dispatches into the `easyllama` package.
-- Each mode builds its own local image tag, for example `llamacpp-local:cuda13-basic` or `llamacpp-local:cuda13-lucebox`.
-- If you change Python runtime code under `easyllama/`, rebuild the affected mode image before testing. The runtime code is baked into the image; it is not bind-mounted from the host.
-
-## Runtime Layout
-
-```mermaid
-flowchart LR
-    Client[Client or SDK] --> Swap[llama-swap :8080]
-    Swap --> Chat[qwen3-chat]
-    Swap --> Embed[qwen3-embeddings or qmd-embed]
-    Swap --> Generate[qmd-generate]
-    Swap --> Rank[qmd-rerank]
-
-    Chat --> Basic[plain llama-server]
-    Chat --> Turbo[turboquant llama-server]
-    Chat --> Luce[Luce dflash or pflash]
-```
-
-In `lucebox` mode only the `qwen3-chat` path moves to Luce. The embedding, generation, and rerank helpers still run through plain `llama-server` style upstreams.
-
 ## Modes
 
 | Mode | Best for | `qwen3-chat` backend | Default chat weights | Extra API surface |
 | --- | --- | --- | --- | --- |
 | `basic` | Simplest plain llama.cpp path | `llama-server-basic` | `unsloth/Qwen3.6-27B-GGUF:Q4_K_M` | none |
 | `turboquant` | Turboquant KV-cache experiments | `llama-server-turboquant` | `HauhauCS/Qwen3.6-27B-Uncensored-HauhauCS-Aggressive:Q5_K_P` | none |
+| `spiritbuun` | buun-llama-cpp DFlash experiments | `easyllama server spiritbuun` | `unsloth/Qwen3.6-27B-GGUF:Q5_K_M` plus `Ardenzard/Qwen3.6-27B-DFlash-GGUF:Qwen3.6-27B-DFlash-Q5_K_M.gguf` | none |
 | `lucebox` | Luce dflash/pflash chat serving | `easyllama server lucebox` | `unsloth/Qwen3.6-27B-GGUF:Q4_K_M` plus `KingsonHO/Qwen3.6-27B-DFlash:model.safetensors` | `POST /v1/messages` |
 
-Use `basic` when you want the least surprising path. Use `turboquant` when you specifically want the turboquant backend and cache types. Use `lucebox` when you want the Luce chat path while keeping the rest of the public API on the same port.
+Use `basic` when you want the least surprising path. Use `turboquant` when you specifically want the turboquant backend and cache types. Use `spiritbuun` when you want buun's `--spec-type dflash` path with the published Ardenzard GGUF drafter. Use `lucebox` when you want the Luce chat path while keeping the rest of the public API on the same port.
+
+The Spiritbuun chat default uses `unsloth/Qwen3.6-27B-GGUF:Q5_K_M` as target plus `Ardenzard/Qwen3.6-27B-DFlash-GGUF:Qwen3.6-27B-DFlash-Q5_K_M.gguf` as draft, with `turbo4/turbo4` KV cache, `-c 131072`, `-np 1`, `-cd 256`, `--draft-max 8`, `--draft-min 1`, `--draft-p-min 0.75`, and `--temp 0.2` for `qwen3-chat`.
+
+`spiritbuun` keeps Qwen3.6 thinking disabled by default for `qwen3-chat`.
+
+Avoid adding an mmproj to the Spiritbuun chat path unless you have verified that speculative decoding remains enabled on your build.
 
 ## Requirements
 
@@ -107,8 +78,6 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -e . -r requirements-dev.txt
 ```
 
-`run.sh` looks for `.venv/bin/easyllama` first, then `/opt/venv/bin/easyllama`, then a globally installed `easyllama`, then falls back to `python -m easyllama` from the repo checkout.
-
 ## Quick Start
 
 ### 1. Create credentials
@@ -124,6 +93,7 @@ Set `hf_token` for private or rate-limited Hugging Face pulls. Set `api_key` if 
 ```bash
 cp config.basic.yml.example config.basic.yml
 cp config.turboquant.yml.example config.turboquant.yml
+cp config.spiritbuun.yml.example config.spiritbuun.yml
 cp config.lucebox.yml.example config.lucebox.yml
 ```
 
@@ -153,6 +123,14 @@ If you do not create an active config, `run.sh` falls back to the matching examp
 ./run.sh --mode lucebox build
 ./run.sh --mode lucebox start
 ./run.sh --mode lucebox warmup qwen3-chat qwen3-embeddings qmd-generate qmd-rerank
+```
+
+`spiritbuun`:
+
+```bash
+./run.sh --mode spiritbuun build
+./run.sh --mode spiritbuun start
+./run.sh --mode spiritbuun warmup qwen3-chat qwen3-embeddings qmd-generate qmd-rerank
 ```
 
 With no model arguments, `./run.sh warmup` warms every model currently exposed by `/v1/models`.
@@ -199,9 +177,11 @@ curl -sS "${AUTH[@]}" http://127.0.0.1:8080/v1/models | jq -r '.data[].id'
 | `auth.json.example` | Credential template |
 | `config.basic.yml` | Editable config for `basic` |
 | `config.turboquant.yml` | Editable config for `turboquant` |
+| `config.spiritbuun.yml` | Editable config for `spiritbuun` |
 | `config.lucebox.yml` | Editable config for `lucebox` |
 | `config.basic.yml.example` | Tracked `basic` template |
 | `config.turboquant.yml.example` | Tracked `turboquant` template |
+| `config.spiritbuun.yml.example` | Tracked `spiritbuun` template |
 | `config.lucebox.yml.example` | Tracked `lucebox` template |
 | `models/` | Shared Hugging Face cache |
 | `mmproj/` | Host-side mmproj assets |
@@ -212,7 +192,7 @@ Common environment overrides:
 
 | Variable | Purpose |
 | --- | --- |
-| `LLAMACPP_MODE` | Select `basic`, `turboquant`, or `lucebox` |
+| `LLAMACPP_MODE` | Select `basic`, `turboquant`, `spiritbuun`, or `lucebox` |
 | `LLAMACPP_LS_CONFIG_FILE` | Override mode-based config selection with an explicit file |
 | `LLAMACPP_HOST_PORT` | Change the published host port |
 | `LLAMACPP_AUTH_FILE` | Point to a different auth JSON file |
@@ -224,9 +204,8 @@ Common environment overrides:
 
 Notes:
 
-- If `auth.json` contains `api_key`, `easyllama` injects that into the effective llama-swap config so `/v1/*` routes require a bearer token.
-- If exactly one `*.gguf` file exists under `mmproj/` and you do not set an override, `easyllama` will auto-select it.
-- `LLAMACPP_LS_CONFIG_FILE` bypasses the mode-specific config file names entirely.
+- If `auth.json` contains `api_key`, `/v1/*` routes require `Authorization: Bearer <api_key>`.
+- `LLAMACPP_LS_CONFIG_FILE` overrides mode-based config selection.
 
 ## Models and Endpoints
 
@@ -244,21 +223,22 @@ Notes:
 
 - `basic`: `unsloth/Qwen3.6-27B-GGUF:Q4_K_M`
 - `turboquant`: `HauhauCS/Qwen3.6-27B-Uncensored-HauhauCS-Aggressive:Q5_K_P`
+- `spiritbuun`: `unsloth/Qwen3.6-27B-GGUF:Q5_K_M` as target plus `Ardenzard/Qwen3.6-27B-DFlash-GGUF:Qwen3.6-27B-DFlash-Q5_K_M.gguf` as draft GGUF
 - `lucebox`: `unsloth/Qwen3.6-27B-GGUF:Q4_K_M` as target plus `KingsonHO/Qwen3.6-27B-DFlash:model.safetensors` as draft weights
 
 ### Endpoint matrix
 
-| Endpoint | `basic` | `turboquant` | `lucebox` | Notes |
-| --- | --- | --- | --- | --- |
-| `GET /health` | yes | yes | yes | Runtime health |
-| `GET /v1/models` | yes | yes | yes | Lists model IDs |
-| `POST /v1/chat/completions` | yes | yes | yes | Use `qwen3-chat` |
-| `POST /v1/messages` | no | no | yes | Lucebox-only messages route |
-| `POST /v1/completions` | yes | yes | yes | Best fit for `qmd-generate` |
-| `POST /v1/responses` | yes | yes | yes | Use `qmd-generate` |
-| `POST /v1/embeddings` | yes | yes | yes | Use `qwen3-embeddings` or `qmd-embed` |
-| `POST /v1/rerank` | yes | yes | yes | Use `qmd-rerank` |
-| `GET /ui` | yes | yes | yes | Built-in llama-swap UI |
+| Endpoint | `basic` | `turboquant` | `spiritbuun` | `lucebox` | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `GET /health` | yes | yes | yes | yes | Runtime health |
+| `GET /v1/models` | yes | yes | yes | yes | Lists model IDs |
+| `POST /v1/chat/completions` | yes | yes | yes | yes | Use `qwen3-chat` |
+| `POST /v1/messages` | no | no | no | yes | Lucebox-only messages route |
+| `POST /v1/completions` | yes | yes | yes | yes | Best fit for `qmd-generate` |
+| `POST /v1/responses` | yes | yes | yes | yes | Use `qmd-generate` |
+| `POST /v1/embeddings` | yes | yes | yes | yes | Use `qwen3-embeddings` or `qmd-embed` |
+| `POST /v1/rerank` | yes | yes | yes | yes | Use `qmd-rerank` |
+| `GET /ui` | yes | yes | yes | yes | Built-in llama-swap UI |
 
 Notes:
 
