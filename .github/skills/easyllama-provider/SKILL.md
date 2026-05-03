@@ -1,5 +1,5 @@
 ---
-name: easyllama-provider-integration
+name: easyllama-provider
 description: 'Add or refactor an easyllama provider or mode. Use when integrating a new llama.cpp fork/backend, creating or extending launchers in easyllama/servers, wiring Dockerfile targets and config templates, updating README mode docs, rebuilding the mode image, warming models, and running the full public endpoint regression suite.'
 argument-hint: 'Provider or mode name, upstream repo/ref, and whether it needs a dedicated server class'
 ---
@@ -58,47 +58,21 @@ Create or update a provider mode for this repository without reintroducing hardc
 
 6. Run code-level validation.
 
-   Use the narrowest checks that match the touched surface:
-
-   ```bash
-   bash -n run.sh
-   .venv/bin/python -m ruff check easyllama
-   .venv/bin/python -m compileall easyllama
-   ./run.sh help
-   ```
+   Use the [code validation script](./scripts/validate-code.sh). It runs the repo's narrow host-side checks for `run.sh`, `easyllama`, and the CLI surface from the repository root.
 
    If the repo lacks dedicated unit tests for the provider path, treat diagnostics plus the runtime endpoint suite as the required gate.
 
 7. Rebuild and warm the provider mode.
 
-   ```bash
-   ./run.sh --mode <provider> build
-   ./run.sh --mode <provider> restart
-   ./run.sh --mode <provider> warmup
-   ```
+   Use the [rebuild and warmup script](./scripts/rebuild-and-warmup.sh). Pass the mode name as the first argument and optional model IDs after it. If you omit model IDs, the script warms every model currently exposed by `/v1/models`.
 
    Rebuild whenever Python runtime code, Docker targets, launcher code, or config-loading behavior changed, because the runtime is baked into the image.
 
 8. Run the public endpoint regression suite.
 
-   Validate the full OpenAI-compatible public surface for the provider mode:
+   Use the [public endpoint regression script](./scripts/test-public-endpoints.sh). Pass the mode name as the first argument. The script covers `GET /health`, `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/completions`, `POST /v1/responses`, both `POST /v1/embeddings` aliases, `POST /v1/rerank`, and `GET /ui/`. It automatically checks `POST /v1/messages` for `lucebox`, and you can force that route for another provider with `--messages`.
 
-   - `GET /health`
-   - `GET /v1/models`
-   - `POST /v1/chat/completions`
-   - `POST /v1/completions`
-   - `POST /v1/responses`
-   - `POST /v1/embeddings` for every embedding alias
-   - `POST /v1/rerank`
-   - `GET /ui/`
-   - `POST /v1/messages` only if the provider explicitly exposes that route
-
-   Check minimal response shape, not just status codes:
-
-   - advertised model IDs are correct
-   - chat responses contain assistant content
-   - embeddings return vectors with the expected dimension
-   - rerank returns the expected number of results
+   The script validates minimal response shape, not just status codes: advertised model IDs, assistant content for chat-style responses, non-empty embedding vectors with matching dimensions across aliases, and one rerank result per input document.
 
 9. If validation fails, debug locally before expanding scope.
 
@@ -119,6 +93,6 @@ Create or update a provider mode for this repository without reintroducing hardc
 
 ## Example Prompts
 
-- `/easyllama-provider-integration Add a new provider mode backed by <repo>@<ref> and wire it into Docker, config, and README.`
-- `/easyllama-provider-integration Refactor this provider integration so runtime metadata lives on the server classes and then rerun the endpoint suite.`
-- `/easyllama-provider-integration Audit the new provider mode, rebuild it, warm it, and run all public endpoints for regressions.`
+- `/easyllama-provider Add a new provider mode backed by <repo>@<ref> and wire it into Docker, config, and README.`
+- `/easyllama-provider Refactor this provider integration so runtime metadata lives on the server classes and then rerun the endpoint suite.`
+- `/easyllama-provider Audit the new provider mode, rebuild it, warm it, and run all public endpoints for regressions.`

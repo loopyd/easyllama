@@ -6,7 +6,7 @@
 
 healthCheckTimeout: 1800
 logLevel: info
-sendLoadingState: true
+sendLoadingState: false
 globalTTL: 0
 
 # Shared llama-server argument macros
