@@ -1,0 +1,269 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/mostlygeek/llama-swap/refs/heads/main/config-schema.json
+#
+# Copy this file to config.basic.yml for local edits and overrides.
+# Use this default mode with ./run.sh start when you want the original plain
+# llama-server qwen3-chat path without Luce dflash+pflash.
+#
+# Exposes:
+# - qwen3-chat for chat/completions-style requests without dflash+pflash
+# - qwen3-embeddings for /v1/embeddings
+# - qmd-generate for QMD completions/query expansion
+# - qmd-embed for QMD embeddings
+# - qmd-rerank for /v1/rerank
+#
+# Common local flow:
+# - cp config.basic.yml.example config.basic.yml
+# - ./run.sh start
+# - curl http://localhost:8080/v1/models
+# - model downloads begin on first authenticated use, not during container startup
+# - optional: ./run.sh warmup qwen3-chat qwen3-embeddings qmd-rerank
+#
+# Primary API routes:
+# - POST /v1/chat/completions with model=qwen3-chat
+# - POST /v1/embeddings with model=qwen3-embeddings
+# - POST /v1/completions with model=qmd-generate
+# - POST /v1/embeddings with model=qmd-embed
+# - POST /v1/rerank with model=qmd-rerank
+
+healthCheckTimeout: 1800
+logLevel: info
+sendLoadingState: true
+globalTTL: 0
+
+# Shared llama-server argument macros
+macros:
+  server_bin: "/opt/venv/bin/easyllama"
+  llama_server_bin: "/app/bin/llama-server-basic"
+  kv_ctx_size: "131072"
+  qwen3_chat_target_hf: "unsloth/Qwen3.6-27B-GGUF:Q4_K_M"
+  pi_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
+  qmd_chat_hf_model: "tobil/qmd-query-expansion-1.7B-gguf:Q8_0"
+  qmd_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
+  qmd_rerank_hf_model: "mradermacher/Qwen3-Reranker-8B-GGUF:Q5_K_M"
+  n_predict: "8192"
+  temp: "0.6"
+  top_k: "20"
+  top_p: "0.95"
+  min_p: "0.0"
+  sampler_seq: "edskypmxt"
+  repeat_last_n: "512"
+  repeat_penalty: "1.05"
+  presence_penalty: "1.5"
+  frequency_penalty: "0.0"
+  dry_multiplier: "0.0"
+  dry_base: "1.75"
+  dry_allowed_length: "2"
+  dry_penalty_last_n: "2048"
+  batch_size: "1024"
+  ubatch_size: "256"
+  parallel: "1"
+  flash_attn: "on"
+  fit: "on"
+  cache_type_k: "q4_0"
+  cache_type_v: "q8_0"
+  poll: "1"
+  no_mmap: "--no-mmap"
+  kv_unified: "--kv-unified"
+  cache_idle_slots: ""
+  backend_sampling: "--backend-sampling"
+  web_ui_off: "--no-webui"
+  jinja_on: "--jinja"
+  no_warmup: "--no-warmup"
+  mmproj_arg: "${env.LLAMACPP_MMPROJ_ARG}"
+  chat_template_file: "/chat_template/qwen3.6.jinja"
+  chat_template_kwargs: '{\"tokenize\":false,\"add_generation_prompt\":true,\"preserve_thinking\":true}'
+  reasoning: "on"
+  reasoning_format: "auto"
+  reasoning_budget: "4096"
+  reasoning_budget_message: '...\ output\ your\ final\ answer\ now.'
+  emb_cache_type_k: "f16"
+  emb_cache_type_v: "f16"
+  rerank_batch_size: "2048"
+  rerank_ubatch_size: "2048"
+  rerank_ctx_size: "4096"
+
+models:
+  # Chat model
+  # Plain llama-server qwen3-chat path without Luce dflash+pflash.
+  "qwen3-chat":
+    name: "Pi Qwen3 Chat"
+    description: "Primary llama-server chat/completions model without dflash+pflash"
+    cmd: |
+      ${server_bin}
+      server
+      basic
+      --bin ${llama_server_bin}
+      --port ${PORT}
+      -hf ${qwen3_chat_target_hf}
+      ${mmproj_arg}
+      --ctx-size ${kv_ctx_size}
+      --n-predict ${n_predict}
+      --temp ${temp}
+      --top-k ${top_k}
+      --top-p ${top_p}
+      --min-p ${min_p}
+      --sampler-seq ${sampler_seq}
+      --repeat-last-n ${repeat_last_n}
+      --repeat-penalty ${repeat_penalty}
+      --presence-penalty ${presence_penalty}
+      --frequency-penalty ${frequency_penalty}
+      --dry-multiplier ${dry_multiplier}
+      --dry-base ${dry_base}
+      --dry-allowed-length ${dry_allowed_length}
+      --dry-penalty-last-n ${dry_penalty_last_n}
+      --batch-size ${batch_size}
+      --ubatch-size ${ubatch_size}
+      --parallel ${parallel}
+      --fit ${fit}
+      --flash-attn ${flash_attn}
+      --cache-type-k ${cache_type_k}
+      --cache-type-v ${cache_type_v}
+      ${kv_unified}
+      ${cache_idle_slots}
+      ${backend_sampling}
+      ${web_ui_off}
+      ${no_warmup}
+      ${no_mmap}
+      --poll ${poll}
+      ${jinja_on}
+      --chat-template-file ${chat_template_file}
+      --chat-template-kwargs ${chat_template_kwargs}
+      --reasoning ${reasoning}
+      --reasoning-format ${reasoning_format}
+      --reasoning-budget ${reasoning_budget}
+      --reasoning-budget-message ${reasoning_budget_message}
+
+    env:
+      - "HF_TOKEN=${env.HF_TOKEN}"
+
+  # Embedding model
+  # Lightweight config for /v1/embeddings requests.
+  "qwen3-embeddings":
+    name: "Pi Qwen3 Embeddings 8B"
+    description: "Dense embedding model for vector search, RAG, similarity"
+    cmd: |
+      ${server_bin}
+      server
+      basic
+      --bin ${llama_server_bin}
+      --port ${PORT}
+      -hf ${pi_emb_hf_model}
+      --ctx-size ${kv_ctx_size}
+      --batch-size ${batch_size}
+      --ubatch-size ${ubatch_size}
+      --parallel ${parallel}
+      --flash-attn ${flash_attn}
+      --cache-type-k ${emb_cache_type_k}
+      --cache-type-v ${emb_cache_type_v}
+      ${kv_unified}
+      ${no_mmap}
+      --embedding
+      ${no_warmup}
+
+    env:
+      - "HF_TOKEN=${env.HF_TOKEN}"
+
+  # QMD alias for query expansion / completions.
+  # Uses the existing chat model without changing Pi's current alias.
+  "qmd-generate":
+    name: "QMD Query Expansion"
+    description: "Alias for QMD query expansion and OpenAI-compatible completions"
+    cmd: |
+      ${server_bin}
+      server
+      basic
+      --bin ${llama_server_bin}
+      --port ${PORT}
+      -hf ${qmd_chat_hf_model}
+      --ctx-size ${kv_ctx_size}
+      --n-predict ${n_predict}
+      --temp ${temp}
+      --top-k ${top_k}
+      --top-p ${top_p}
+      --min-p ${min_p}
+      --sampler-seq ${sampler_seq}
+      --repeat-last-n ${repeat_last_n}
+      --repeat-penalty ${repeat_penalty}
+      --presence-penalty ${presence_penalty}
+      --frequency-penalty ${frequency_penalty}
+      --dry-multiplier ${dry_multiplier}
+      --dry-base ${dry_base}
+      --dry-allowed-length ${dry_allowed_length}
+      --dry-penalty-last-n ${dry_penalty_last_n}
+      --batch-size ${batch_size}
+      --ubatch-size ${ubatch_size}
+      --parallel ${parallel}
+      --fit ${fit}
+      --flash-attn ${flash_attn}
+      --cache-type-k ${cache_type_k}
+      --cache-type-v ${cache_type_v}
+      ${kv_unified}
+      ${cache_idle_slots}
+      ${backend_sampling}
+      ${web_ui_off}
+      ${no_warmup}
+      ${no_mmap}
+      --poll ${poll}
+      ${jinja_on}
+      --chat-template-file ${chat_template_file}
+      --chat-template-kwargs ${chat_template_kwargs}
+      --reasoning ${reasoning}
+      --reasoning-format ${reasoning_format}
+      --reasoning-budget ${reasoning_budget}
+      --reasoning-budget-message ${reasoning_budget_message}
+
+    env:
+      - "HF_TOKEN=${env.HF_TOKEN}"
+
+  # QMD alias for embeddings.
+  # Uses the existing embedding model without changing Pi's current alias.
+  "qmd-embed":
+    name: "QMD Embedding"
+    description: "Alias for QMD /v1/embeddings requests"
+    cmd: |
+      ${server_bin}
+      server
+      basic
+      --bin ${llama_server_bin}
+      --port ${PORT}
+      -hf ${qmd_emb_hf_model}
+      --ctx-size ${kv_ctx_size}
+      --batch-size ${batch_size}
+      --ubatch-size ${ubatch_size}
+      --parallel ${parallel}
+      --flash-attn ${flash_attn}
+      --cache-type-k ${emb_cache_type_k}
+      --cache-type-v ${emb_cache_type_v}
+      ${kv_unified}
+      ${no_mmap}
+      --embedding
+      ${no_warmup}
+
+    env:
+      - "HF_TOKEN=${env.HF_TOKEN}"
+
+  # Dedicated reranker alias for QMD.
+  "qmd-rerank":
+    name: "Qwen3 Reranker 8B"
+    description: "Cross-encoder reranking model for QMD /v1/rerank requests"
+    cmd: |
+      ${server_bin}
+      server
+      basic
+      --bin ${llama_server_bin}
+      --port ${PORT}
+      -hf ${qmd_rerank_hf_model}
+      --ctx-size ${rerank_ctx_size}
+      --batch-size ${rerank_batch_size}
+      --ubatch-size ${rerank_ubatch_size}
+      --parallel ${parallel}
+      --flash-attn ${flash_attn}
+      --cache-type-k ${emb_cache_type_k}
+      --cache-type-v ${emb_cache_type_v}
+      ${kv_unified}
+      ${no_mmap}
+      --reranking
+      ${no_warmup}
+
+    env:
+      - "HF_TOKEN=${env.HF_TOKEN}"

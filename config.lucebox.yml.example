@@ -1,0 +1,230 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/mostlygeek/llama-swap/refs/heads/main/config-schema.json
+#
+# Copy this file to config.lucebox.yml for local edits and overrides.
+# Use this mode with ./run.sh --mode lucebox start when you want Luce
+# dflash+pflash for qwen3-chat and plain llama-server for the other models.
+
+healthCheckTimeout: 1800
+logLevel: info
+sendLoadingState: true
+globalTTL: 0
+
+# Shared llama-server argument macros
+macros:
+  server_bin: "/opt/venv/bin/easyllama"
+  llama_server_bin: "/app/bin/llama-server-basic"
+  kv_ctx_size: "131072"
+  pi_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
+  qmd_chat_hf_model: "tobil/qmd-query-expansion-1.7B-gguf:Q8_0"
+  qmd_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
+  qmd_rerank_hf_model: "mradermacher/Qwen3-Reranker-8B-GGUF:Q5_K_M"
+  n_predict: "8192"
+  temp: "0.6"
+  top_k: "20"
+  top_p: "0.95"
+  min_p: "0.0"
+  sampler_seq: "edskypmxt"
+  repeat_last_n: "512"
+  repeat_penalty: "1.05"
+  presence_penalty: "1.5"
+  frequency_penalty: "0.0"
+  dry_multiplier: "0.0"
+  dry_base: "1.75"
+  dry_allowed_length: "2"
+  dry_penalty_last_n: "2048"
+  batch_size: "1024"
+  ubatch_size: "256"
+  parallel: "1"
+  flash_attn: "on"
+  fit: "on"
+  cache_type_k: "q4_0"
+  cache_type_v: "q8_0"
+  poll: "1"
+  no_mmap: "--no-mmap"
+  kv_unified: "--kv-unified"
+  cache_idle_slots: ""
+  backend_sampling: "--backend-sampling"
+  web_ui_off: "--no-webui"
+  jinja_on: "--jinja"
+  no_warmup: "--no-warmup"
+  mmproj_arg: "${env.LLAMACPP_MMPROJ_ARG}"
+  chat_template_file: "/chat_template/qwen3.6.jinja"
+  chat_template_kwargs: '{\"tokenize\":false,\"add_generation_prompt\":true,\"preserve_thinking\":true}'
+  reasoning: "on"
+  reasoning_format: "auto"
+  reasoning_budget: "4096"
+  reasoning_budget_message: '...\ output\ your\ final\ answer\ now.'
+  emb_cache_type_k: "f16"
+  emb_cache_type_v: "f16"
+  rerank_batch_size: "2048"
+  rerank_ubatch_size: "2048"
+  rerank_ctx_size: "4096"
+  qwen3_chat_target_hf: "unsloth/Qwen3.6-27B-GGUF:Q4_K_M"
+  qwen3_chat_draft_hf: "KingsonHO/Qwen3.6-27B-DFlash:model.safetensors"
+  qwen3_chat_prefill_drafter_hf: "unsloth/Qwen3-0.6B-GGUF:Qwen3-0.6B-BF16.gguf"
+  qwen3_chat_tokenizer: "Qwen/Qwen3.6-27B"
+  qwen3_chat_prefill_drafter_tokenizer: "Qwen/Qwen3-0.6B"
+  dflash_pflash_use_bsa: "1"
+  dflash_pflash_alpha: "0.85"
+  dflash_pflash_profile: ""
+  dflash_budget: "22"
+  dflash_max_ctx: "16384"
+  dflash_fa_window: "0"
+  dflash_prefill_compression: "auto"
+  dflash_prefill_threshold: "32000"
+  dflash_prefill_keep_ratio: "0.05"
+  dflash_cache_args: ""
+
+models:
+  "qwen3-chat":
+    name: "Pi Qwen3 Chat"
+    description: "Primary Luce dflash+pflash chat/messages model with SSE"
+    cmd: |
+      ${server_bin}
+      server
+      lucebox
+      --port ${PORT}
+      --model-name qwen3-chat
+      --target-hf ${qwen3_chat_target_hf}
+      --draft-hf ${qwen3_chat_draft_hf}
+      --budget ${dflash_budget}
+      --max-ctx ${dflash_max_ctx}
+      ${dflash_cache_args}
+      --fa-window ${dflash_fa_window}
+      --tokenizer ${qwen3_chat_tokenizer}
+      --prefill-compression ${dflash_prefill_compression}
+      --prefill-threshold ${dflash_prefill_threshold}
+      --prefill-keep-ratio ${dflash_prefill_keep_ratio}
+      --prefill-drafter-hf ${qwen3_chat_prefill_drafter_hf}
+      --prefill-drafter-tokenizer ${qwen3_chat_prefill_drafter_tokenizer}
+      --pflash-use-bsa ${dflash_pflash_use_bsa}
+      --pflash-alpha ${dflash_pflash_alpha}
+      ${dflash_pflash_profile}
+
+    env:
+      - "HF_TOKEN=${env.HF_TOKEN}"
+
+  "qwen3-embeddings":
+    name: "Pi Qwen3 Embeddings 8B"
+    description: "Dense embedding model for vector search, RAG, similarity"
+    cmd: |
+      ${server_bin}
+      server
+      basic
+      --bin ${llama_server_bin}
+      --port ${PORT}
+      -hf ${pi_emb_hf_model}
+      --ctx-size ${kv_ctx_size}
+      --batch-size ${batch_size}
+      --ubatch-size ${ubatch_size}
+      --parallel ${parallel}
+      --flash-attn ${flash_attn}
+      --cache-type-k ${emb_cache_type_k}
+      --cache-type-v ${emb_cache_type_v}
+      ${kv_unified}
+      ${no_mmap}
+      --embedding
+      ${no_warmup}
+
+    env:
+      - "HF_TOKEN=${env.HF_TOKEN}"
+
+  "qmd-generate":
+    name: "QMD Query Expansion"
+    description: "Alias for QMD query expansion and OpenAI-compatible completions"
+    cmd: |
+      ${server_bin}
+      server
+      basic
+      --bin ${llama_server_bin}
+      --port ${PORT}
+      -hf ${qmd_chat_hf_model}
+      --ctx-size ${kv_ctx_size}
+      --n-predict ${n_predict}
+      --temp ${temp}
+      --top-k ${top_k}
+      --top-p ${top_p}
+      --min-p ${min_p}
+      --sampler-seq ${sampler_seq}
+      --repeat-last-n ${repeat_last_n}
+      --repeat-penalty ${repeat_penalty}
+      --presence-penalty ${presence_penalty}
+      --frequency-penalty ${frequency_penalty}
+      --dry-multiplier ${dry_multiplier}
+      --dry-base ${dry_base}
+      --dry-allowed-length ${dry_allowed_length}
+      --dry-penalty-last-n ${dry_penalty_last_n}
+      --batch-size ${batch_size}
+      --ubatch-size ${ubatch_size}
+      --parallel ${parallel}
+      --fit ${fit}
+      --flash-attn ${flash_attn}
+      --cache-type-k ${cache_type_k}
+      --cache-type-v ${cache_type_v}
+      ${kv_unified}
+      ${cache_idle_slots}
+      ${backend_sampling}
+      ${web_ui_off}
+      ${no_warmup}
+      ${no_mmap}
+      --poll ${poll}
+      ${jinja_on}
+      --chat-template-file ${chat_template_file}
+      --chat-template-kwargs ${chat_template_kwargs}
+      --reasoning ${reasoning}
+      --reasoning-format ${reasoning_format}
+      --reasoning-budget ${reasoning_budget}
+      --reasoning-budget-message ${reasoning_budget_message}
+
+    env:
+      - "HF_TOKEN=${env.HF_TOKEN}"
+
+  "qmd-embed":
+    name: "QMD Embedding"
+    description: "Alias for QMD /v1/embeddings requests"
+    cmd: |
+      ${server_bin}
+      server
+      basic
+      --bin ${llama_server_bin}
+      --port ${PORT}
+      -hf ${qmd_emb_hf_model}
+      --ctx-size ${kv_ctx_size}
+      --batch-size ${batch_size}
+      --ubatch-size ${ubatch_size}
+      --parallel ${parallel}
+      --flash-attn ${flash_attn}
+      --cache-type-k ${emb_cache_type_k}
+      --cache-type-v ${emb_cache_type_v}
+      ${kv_unified}
+      ${no_mmap}
+      --embedding
+      ${no_warmup}
+
+    env:
+      - "HF_TOKEN=${env.HF_TOKEN}"
+
+  "qmd-rerank":
+    name: "Qwen3 Reranker 8B"
+    description: "Cross-encoder reranking model for QMD /v1/rerank requests"
+    cmd: |
+      ${server_bin}
+      server
+      basic
+      --bin ${llama_server_bin}
+      --port ${PORT}
+      -hf ${qmd_rerank_hf_model}
+      --ctx-size ${rerank_ctx_size}
+      --batch-size ${rerank_batch_size}
+      --ubatch-size ${rerank_ubatch_size}
+      --parallel ${parallel}
+      --flash-attn ${flash_attn}
+      --cache-type-k ${emb_cache_type_k}
+      --cache-type-v ${emb_cache_type_v}
+      ${kv_unified}
+      ${no_mmap}
+      --reranking
+      ${no_warmup}
+
+    env:
+      - "HF_TOKEN=${env.HF_TOKEN}"

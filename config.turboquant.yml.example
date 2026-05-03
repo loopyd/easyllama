@@ -1,39 +1,20 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/mostlygeek/llama-swap/refs/heads/main/config-schema.json
 #
-# Copy this file to config.yml for local edits and overrides.
-# easy llama(cpp) llama-swap config
-#
-# Exposes:
-# - qwen3-chat for chat/completions-style requests
-# - qwen3-embeddings for /v1/embeddings
-# - qmd-generate for QMD completions/query expansion
-# - qmd-embed for QMD embeddings
-# - qmd-rerank for /v1/rerank
-#
-# Common local flow:
-# - cp config.yml.example config.yml
-# - ./run.sh start
-# - curl http://localhost:8080/v1/models
-# - model downloads begin on first authenticated use, not during container startup
-# - optional: ./run.sh warmup qwen3-chat qwen3-embeddings qmd-rerank
-#
-# Primary API routes:
-# - POST /v1/chat/completions with model=qwen3-chat
-# - POST /v1/embeddings with model=qwen3-embeddings
-# - POST /v1/completions with model=qmd-generate
-# - POST /v1/embeddings with model=qmd-embed
-# - POST /v1/rerank with model=qmd-rerank
+# Copy this file to config.turboquant.yml for local edits and overrides.
+# Use this mode with ./run.sh --mode turboquant start when you want the
+# original TheTom turboquant qwen3-chat path and turbo4 KV cache settings.
 
-healthCheckTimeout: 600
+healthCheckTimeout: 1800
 logLevel: info
 sendLoadingState: true
 globalTTL: 0
 
 # Shared llama-server argument macros
 macros:
-  server_bin: "/app/bin/llama-server"
+  server_bin: "/opt/venv/bin/easyllama"
+  llama_server_bin: "/app/bin/llama-server-turboquant"
   kv_ctx_size: "131072"
-  pi_chat_hf_model: "HauhauCS/Qwen3.6-27B-Uncensored-HauhauCS-Aggressive:Q5_K_P"
+  qwen3_chat_target_hf: "HauhauCS/Qwen3.6-27B-Uncensored-HauhauCS-Aggressive:Q5_K_P"
   pi_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
   qmd_chat_hf_model: "tobil/qmd-query-expansion-1.7B-gguf:Q8_0"
   qmd_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
@@ -81,15 +62,16 @@ macros:
   rerank_ctx_size: "4096"
 
 models:
-  # Chat model
-  # OpenAI-compatible completions/chat endpoint with tuned inference defaults.
   "qwen3-chat":
     name: "Pi Qwen3 Chat 27B Turboquant"
-    description: "Primary chat/completions model — turboquant KV cache enabled"
+    description: "Primary chat/completions model with turboquant KV cache enabled"
     cmd: |
       ${server_bin}
+      server
+      basic
+      --bin ${llama_server_bin}
       --port ${PORT}
-      -hf ${pi_chat_hf_model}
+      -hf ${qwen3_chat_target_hf}
       ${mmproj_arg}
       --ctx-size ${kv_ctx_size}
       --n-predict ${n_predict}
@@ -131,13 +113,14 @@ models:
     env:
       - "HF_TOKEN=${env.HF_TOKEN}"
 
-  # Embedding model
-  # Lightweight config for /v1/embeddings requests.
   "qwen3-embeddings":
     name: "Pi Qwen3 Embeddings 8B"
     description: "Dense embedding model for vector search, RAG, similarity"
     cmd: |
       ${server_bin}
+      server
+      basic
+      --bin ${llama_server_bin}
       --port ${PORT}
       -hf ${pi_emb_hf_model}
       --ctx-size ${kv_ctx_size}
@@ -155,16 +138,16 @@ models:
     env:
       - "HF_TOKEN=${env.HF_TOKEN}"
 
-  # QMD alias for query expansion / completions.
-  # Uses the existing chat model without changing Pi's current alias.
   "qmd-generate":
     name: "QMD Query Expansion"
     description: "Alias for QMD query expansion and OpenAI-compatible completions"
     cmd: |
       ${server_bin}
+      server
+      basic
+      --bin ${llama_server_bin}
       --port ${PORT}
       -hf ${qmd_chat_hf_model}
-      ${mmproj_arg}
       --ctx-size ${kv_ctx_size}
       --n-predict ${n_predict}
       --temp ${temp}
@@ -205,13 +188,14 @@ models:
     env:
       - "HF_TOKEN=${env.HF_TOKEN}"
 
-  # QMD alias for embeddings.
-  # Uses the existing embedding model without changing Pi's current alias.
   "qmd-embed":
     name: "QMD Embedding"
     description: "Alias for QMD /v1/embeddings requests"
     cmd: |
       ${server_bin}
+      server
+      basic
+      --bin ${llama_server_bin}
       --port ${PORT}
       -hf ${qmd_emb_hf_model}
       --ctx-size ${kv_ctx_size}
@@ -229,12 +213,14 @@ models:
     env:
       - "HF_TOKEN=${env.HF_TOKEN}"
 
-  # Dedicated reranker alias for QMD.
   "qmd-rerank":
     name: "Qwen3 Reranker 8B"
     description: "Cross-encoder reranking model for QMD /v1/rerank requests"
     cmd: |
       ${server_bin}
+      server
+      basic
+      --bin ${llama_server_bin}
       --port ${PORT}
       -hf ${qmd_rerank_hf_model}
       --ctx-size ${rerank_ctx_size}

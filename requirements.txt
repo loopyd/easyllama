@@ -1,0 +1,10 @@
+colorama
+docker
+fastapi
+huggingface_hub
+jinja2
+protobuf
+sentencepiece
+torch
+transformers
+uvicorn
