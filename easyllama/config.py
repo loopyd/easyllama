@@ -13,6 +13,7 @@ import urllib.parse
 import urllib.request
 
 from .logger import get_logger
+from .servers import mode_names as server_mode_names
 
 LOGGER = get_logger(__name__)
 RUNTIME_HOST = "host"
@@ -21,7 +22,7 @@ MODE_BASIC = "basic"
 MODE_TURBOQUANT = "turboquant"
 MODE_SPIRITBUUN = "spiritbuun"
 MODE_LUCEBOX = "lucebox"
-VALID_MODES = {MODE_BASIC, MODE_TURBOQUANT, MODE_SPIRITBUUN, MODE_LUCEBOX}
+VALID_MODES = frozenset(server_mode_names())
 MODELS_DIR_CONTAINER = "/root/.cache/huggingface/hub"
 CHAT_TEMPLATE_DIR_CONTAINER = "/chat_template"
 MMPROJ_DIR_CONTAINER = "/mmproj"
@@ -92,10 +93,14 @@ def load_pyproject(root_dir: Path) -> tuple[dict[str, object], dict[str, object]
     return defaults, configs
 
 
+def known_modes() -> tuple[str, ...]:
+    return server_mode_names()
+
+
 def normalize_mode(value: str | None) -> str:
     selected = (value or MODE_BASIC).strip().lower()
     if selected not in VALID_MODES:
-        allowed = ", ".join((MODE_BASIC, MODE_TURBOQUANT, MODE_SPIRITBUUN, MODE_LUCEBOX))
+        allowed = ", ".join(known_modes())
         raise SystemExit(f"unsupported mode: {selected}; allowed: {allowed}")
     return selected
 
@@ -166,22 +171,11 @@ def load_settings(
     image_name_base = str(defaults["image_name_base"])
     image_tag_base = str(defaults["image_tag_base"])
     configs = {
-        MODE_BASIC: ModeConfig(
-            active=absolute_path(root_dir, str(config_defaults[MODE_BASIC])),
-            example=absolute_path(root_dir, str(config_defaults["basic_example"])),
-        ),
-        MODE_TURBOQUANT: ModeConfig(
-            active=absolute_path(root_dir, str(config_defaults[MODE_TURBOQUANT])),
-            example=absolute_path(root_dir, str(config_defaults["turboquant_example"])),
-        ),
-        MODE_SPIRITBUUN: ModeConfig(
-            active=absolute_path(root_dir, str(config_defaults[MODE_SPIRITBUUN])),
-            example=absolute_path(root_dir, str(config_defaults["spiritbuun_example"])),
-        ),
-        MODE_LUCEBOX: ModeConfig(
-            active=absolute_path(root_dir, str(config_defaults[MODE_LUCEBOX])),
-            example=absolute_path(root_dir, str(config_defaults["lucebox_example"])),
-        ),
+        mode_name: ModeConfig(
+            active=absolute_path(root_dir, str(config_defaults[mode_name])),
+            example=absolute_path(root_dir, str(config_defaults[f"{mode_name}_example"])),
+        )
+        for mode_name in known_modes()
     }
     config_override = os.environ.get("LLAMACPP_LS_CONFIG_FILE")
     return Settings(

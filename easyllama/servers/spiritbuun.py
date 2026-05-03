@@ -4,15 +4,31 @@ import argparse
 from pathlib import Path
 
 from .common import ensure_gguf, hf_args, hf_file, hf_get, hf_snap
-from .server_base import ServerBase, Spec
+from .server_base import BuildSource, RuntimeModeMetadata, ServerBase, Spec, server_metadata
 
 DEFAULT_BIN = Path("/app/bin/llama-server-spiritbuun")
 
 
+@server_metadata(
+    name="spiritbuun",
+    help="Run the Spiritbuun dflash llama-server launcher",
+    runtime_modes=(
+        RuntimeModeMetadata(
+            mode="spiritbuun",
+            docker_target="runtime-spiritbuun",
+            build_sources=(
+                BuildSource(
+                    label="spiritbuun",
+                    repo_attr="spiritbuun_llama_cpp_repo",
+                    ref_attr="spiritbuun_llama_cpp_ref",
+                    repo_build_arg="SPIRITBUUN_LLAMA_CPP_REPO",
+                    ref_build_arg="SPIRITBUUN_LLAMA_CPP_REF",
+                ),
+            ),
+        ),
+    ),
+)
 class SpiritbuunServer(ServerBase):
-    name = "spiritbuun"
-    help = "Run the Spiritbuun dflash llama-server launcher"
-
     def add_args(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
             "--bin", type=Path, default=DEFAULT_BIN, help="Spiritbuun llama-server binary to exec"

@@ -4,15 +4,44 @@ import argparse
 from pathlib import Path
 
 from .common import ensure_gguf, hf_args, hf_file, hf_get, hf_snap
-from .server_base import ServerBase, Spec
+from .server_base import BuildSource, RuntimeModeMetadata, ServerBase, Spec, server_metadata
 
 DEFAULT_BIN = Path("/app/bin/llama-server-basic")
 
 
+@server_metadata(
+    name="basic",
+    help="Run the plain llama-server launcher",
+    runtime_modes=(
+        RuntimeModeMetadata(
+            mode="basic",
+            docker_target="runtime-basic",
+            build_sources=(
+                BuildSource(
+                    label="basic",
+                    repo_attr="llama_cpp_repo",
+                    ref_attr="llama_cpp_ref",
+                    repo_build_arg="LLAMA_CPP_REPO",
+                    ref_build_arg="LLAMA_CPP_REF",
+                ),
+            ),
+        ),
+        RuntimeModeMetadata(
+            mode="turboquant",
+            docker_target="runtime-turboquant",
+            build_sources=(
+                BuildSource(
+                    label="turboquant",
+                    repo_attr="turboquant_llama_cpp_repo",
+                    ref_attr="turboquant_llama_cpp_ref",
+                    repo_build_arg="TURBOQUANT_LLAMA_CPP_REPO",
+                    ref_build_arg="TURBOQUANT_LLAMA_CPP_REF",
+                ),
+            ),
+        ),
+    ),
+)
 class BasicServer(ServerBase):
-    name = "basic"
-    help = "Run the plain llama-server launcher"
-
     def add_args(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
             "--bin", type=Path, default=DEFAULT_BIN, help="llama-server binary to exec"

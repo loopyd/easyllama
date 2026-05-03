@@ -15,10 +15,6 @@ from .config import (
     CHAT_TEMPLATE_DIR_CONTAINER,
     LLAMA_SWAP_BIN,
     MMPROJ_DIR_CONTAINER,
-    MODE_BASIC,
-    MODE_LUCEBOX,
-    MODE_SPIRITBUUN,
-    MODE_TURBOQUANT,
     MODELS_DIR_CONTAINER,
     RUNTIME_CONTAINER,
     RUNTIME_HOST,
@@ -31,38 +27,16 @@ from .config import (
     resolved_api_key,
 )
 from .logger import get_logger
+from .servers import mode_def as server_mode_def, mode_defs as server_mode_defs
 
 LOGGER = get_logger(__name__)
-DOCKER_TARGETS = {
-    MODE_BASIC: "runtime-basic",
-    MODE_TURBOQUANT: "runtime-turboquant",
-    MODE_SPIRITBUUN: "runtime-spiritbuun",
-    MODE_LUCEBOX: "runtime-lucebox",
-}
 
 
 def _build_summary(settings: Settings, target: str) -> str:
-    if settings.mode == MODE_BASIC:
-        return (
-            f"building {settings.image_name} (mode={settings.mode} target={target} "
-            f"basic={settings.llama_cpp_repo}@{settings.llama_cpp_ref})"
-        )
-    if settings.mode == MODE_TURBOQUANT:
-        return (
-            f"building {settings.image_name} (mode={settings.mode} target={target} "
-            "turboquant="
-            f"{settings.turboquant_llama_cpp_repo}@{settings.turboquant_llama_cpp_ref})"
-        )
-    if settings.mode == MODE_SPIRITBUUN:
-        return (
-            f"building {settings.image_name} (mode={settings.mode} target={target} "
-            "spiritbuun="
-            f"{settings.spiritbuun_llama_cpp_repo}@{settings.spiritbuun_llama_cpp_ref})"
-        )
-    return (
-        f"building {settings.image_name} (mode={settings.mode} target={target} "
-        f"basic={settings.llama_cpp_repo}@{settings.llama_cpp_ref} "
-        f"lucebox-hub={settings.lucebox_hub_repo}@{settings.lucebox_hub_ref})"
+    return server_mode_def(settings.mode).build_summary(
+        settings,
+        image_name=settings.image_name,
+        target=target,
     )
 
 
@@ -310,23 +284,17 @@ class DockerRuntime:
     def build_image(self) -> int:
         self.ensure_daemon()
         self._ensure_buildx()
-        target = DOCKER_TARGETS[self.settings.mode]
+        mode_metadata = server_mode_def(self.settings.mode)
+        target = mode_metadata.docker_target
         build_args = {
             "BUILD_MODE": self.settings.mode,
             "DEBIAN_FRONTEND": "noninteractive",
             "HOST_TZ": self.settings.host_tz,
             "HOST_LANG": self.settings.host_lang,
             "HOST_LC_ALL": self.settings.host_lc_all,
-            "LLAMA_CPP_REPO": self.settings.llama_cpp_repo,
-            "LLAMA_CPP_REF": self.settings.llama_cpp_ref,
-            "TURBOQUANT_LLAMA_CPP_REPO": self.settings.turboquant_llama_cpp_repo,
-            "TURBOQUANT_LLAMA_CPP_REF": self.settings.turboquant_llama_cpp_ref,
-            "SPIRITBUUN_LLAMA_CPP_REPO": self.settings.spiritbuun_llama_cpp_repo,
-            "SPIRITBUUN_LLAMA_CPP_REF": self.settings.spiritbuun_llama_cpp_ref,
-            "LUCEBOX_HUB_REPO": self.settings.lucebox_hub_repo,
-            "LUCEBOX_HUB_REF": self.settings.lucebox_hub_ref,
             "CMAKE_CUDA_ARCHITECTURES": compute_cuda_architectures(self.settings),
         }
+        build_args.update(mode_metadata.build_args(self.settings))
         LOGGER.info(_build_summary(self.settings, target))
         proc = subprocess.Popen(
             self._build_cmd(target, build_args),
@@ -470,8 +438,8 @@ class DockerRuntime:
                 container.image.tags[0] if container.image.tags else "<untagged>",
             )
         available_images = []
-        for mode in (MODE_BASIC, MODE_TURBOQUANT, MODE_SPIRITBUUN, MODE_LUCEBOX):
-            mode_settings = self.settings.with_mode(mode)
+        for mode_metadata in server_mode_defs():
+            mode_settings = self.settings.with_mode(mode_metadata.mode)
             if self.image_exists(mode_settings.image_name):
                 available_images.append(mode_settings.image_name)
         if available_images:
@@ -486,8 +454,8 @@ class DockerRuntime:
         image_names = [self.settings.image_name]
         if all_images:
             image_names = [
-                self.settings.with_mode(mode).image_name
-                for mode in (MODE_BASIC, MODE_TURBOQUANT, MODE_SPIRITBUUN, MODE_LUCEBOX)
+                self.settings.with_mode(mode_metadata.mode).image_name
+                for mode_metadata in server_mode_defs()
             ]
         for image_name in image_names:
             try:

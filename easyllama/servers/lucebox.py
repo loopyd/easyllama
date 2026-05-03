@@ -10,7 +10,7 @@ import sys
 from typing import Any, cast
 
 from .common import ensure_gguf, hf_args, hf_file, hf_get, hf_snap, pick_asset
-from .server_base import ServerBase, Spec
+from .server_base import BuildSource, RuntimeModeMetadata, ServerBase, Spec, server_metadata
 
 LUCE_SCRIPTS = Path("/opt/lucebox/dflash/scripts")
 FALLBACK_MODEL = "qwen3-chat"
@@ -184,11 +184,33 @@ def load_luce() -> tuple[Any, Any, Any]:
 
     patch_luce_finish_reason(luce)
     return luce, JSONResponse, AutoTokenizer
-
-
+@server_metadata(
+    name="lucebox",
+    help="Run the Luce dflash server",
+    runtime_modes=(
+        RuntimeModeMetadata(
+            mode="lucebox",
+            docker_target="runtime-lucebox",
+            build_sources=(
+                BuildSource(
+                    label="basic",
+                    repo_attr="llama_cpp_repo",
+                    ref_attr="llama_cpp_ref",
+                    repo_build_arg="LLAMA_CPP_REPO",
+                    ref_build_arg="LLAMA_CPP_REF",
+                ),
+                BuildSource(
+                    label="lucebox-hub",
+                    repo_attr="lucebox_hub_repo",
+                    ref_attr="lucebox_hub_ref",
+                    repo_build_arg="LUCEBOX_HUB_REPO",
+                    ref_build_arg="LUCEBOX_HUB_REF",
+                ),
+            ),
+        ),
+    ),
+)
 class LuceboxServer(ServerBase):
-    name = "lucebox"
-    help = "Run the Luce dflash server"
 
     def add_prefill_args(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument(

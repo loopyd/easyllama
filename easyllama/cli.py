@@ -4,14 +4,7 @@ import argparse
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from .config import (
-    MODE_BASIC,
-    MODE_LUCEBOX,
-    MODE_SPIRITBUUN,
-    MODE_TURBOQUANT,
-    RUNTIME_CONTAINER,
-    load_settings,
-)
+from .config import RUNTIME_CONTAINER, known_modes, load_settings
 from .logger import configure_logging
 from .runtime import DockerRuntime, serve, warmup_models
 from .servers import defs as server_defs, run as run_server
@@ -189,11 +182,7 @@ def add_command_nodes(parser: argparse.ArgumentParser, nodes: tuple[CommandNode,
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="easyllama")
-    parser.add_argument(
-        "--mode",
-        choices=[MODE_BASIC, MODE_TURBOQUANT, MODE_SPIRITBUUN, MODE_LUCEBOX],
-        default=None,
-    )
+    parser.add_argument("--mode", choices=known_modes(), default=None)
     parser.add_argument("--verbosity", choices=["debug", "info", "warning", "error"], default=None)
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--no-color", action="store_true")

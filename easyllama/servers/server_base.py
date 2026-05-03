@@ -1,14 +1,57 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
 import signal
 import subprocess
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from ..logger import get_logger
+
+if TYPE_CHECKING:
+    from ..config import Settings
+
+
+@dataclass(frozen=True, slots=True)
+class BuildSource:
+    label: str
+    repo_attr: str
+    ref_attr: str
+    repo_build_arg: str
+    ref_build_arg: str
+
+    def summary(self, settings: Settings) -> str:
+        return (
+            f"{self.label}={getattr(settings, self.repo_attr)}"
+            f"@{getattr(settings, self.ref_attr)}"
+        )
+
+    def build_args(self, settings: Settings) -> dict[str, str]:
+        return {
+            self.repo_build_arg: str(getattr(settings, self.repo_attr)),
+            self.ref_build_arg: str(getattr(settings, self.ref_attr)),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeModeMetadata:
+    mode: str
+    docker_target: str
+    build_sources: tuple[BuildSource, ...] = ()
+
+    def build_summary(self, settings: Settings, *, image_name: str, target: str) -> str:
+        details = " ".join(source.summary(settings) for source in self.build_sources)
+        suffix = f" {details}" if details else ""
+        return f"building {image_name} (mode={self.mode} target={target}{suffix})"
+
+    def build_args(self, settings: Settings) -> dict[str, str]:
+        build_args: dict[str, str] = {}
+        for source in self.build_sources:
+            build_args.update(source.build_args(settings))
+        return build_args
 
 
 @dataclass(slots=True)
@@ -24,6 +67,7 @@ class Spec:
 class ServerBase:
     name = ""
     help = ""
+    runtime_modes: tuple[RuntimeModeMetadata, ...] = ()
 
     def __init__(self) -> None:
         key = self.name or self.__class__.__name__.lower()
@@ -107,3 +151,21 @@ class ServerBase:
     def _handle_signal(self, signum: int, _frame: Any) -> None:
         self.log.info("received signal %s", signum)
         self.stop()
+
+
+ServerClass = TypeVar("ServerClass", bound=type[ServerBase])
+
+
+def server_metadata(
+    *,
+    name: str,
+    help: str,
+    runtime_modes: tuple[RuntimeModeMetadata, ...] = (),
+) -> Callable[[ServerClass], ServerClass]:
+    def decorate(server_cls: ServerClass) -> ServerClass:
+        server_cls.name = name
+        server_cls.help = help
+        server_cls.runtime_modes = runtime_modes
+        return server_cls
+
+    return decorate
