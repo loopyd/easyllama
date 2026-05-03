@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 from functools import lru_cache
+import inspect
+import json
 import os
 from pathlib import Path
 import sys
@@ -16,22 +18,147 @@ FALLBACK_TARGET = Path("/models/target.gguf")
 FALLBACK_DRAFT = Path("/models/draft")
 FALLBACK_BIN = Path("/opt/lucebox/dflash/build/test_dflash")
 FALLBACK_BUDGET = 22
+FALLBACK_CHAT_MAX_TOKENS = 512
+FALLBACK_THINKING_BUDGET_EXTRA = 0
 
 
-def fix_reasoning(luce: Any) -> None:
-    if getattr(luce, "_easyllama_content_fallback_patched", False):
+def patch_luce_finish_reason(luce: Any) -> None:
+    if getattr(luce, "_easyllama_finish_reason_patched", False):
         return
 
-    parse = luce.parse_reasoning
+    source = inspect.getsource(luce.build_app)
+    non_stream_old = '''        msg: dict = {"role": "assistant"}
+        finish_reason = "stop"
+        if reasoning:
+            msg["reasoning_content"] = reasoning
+        if tool_calls:
+            msg["content"] = cleaned if cleaned else None
+            msg["tool_calls"] = tool_calls
+            finish_reason = "tool_calls"
+        else:
+            msg["content"] = cleaned
+'''
+    non_stream_new = '''        msg: dict = {"role": "assistant"}
+        finish_reason = "length" if len(tokens) >= gen_len else "stop"
+        if reasoning:
+            msg["reasoning_content"] = reasoning
+        if tool_calls:
+            msg["content"] = cleaned if cleaned else None
+            msg["tool_calls"] = tool_calls
+            finish_reason = "tool_calls"
+        else:
+            msg["content"] = cleaned
+'''
+    stream_old = '''                    finish_reason = "stop"
+                    if mode == "tool_buffer":
+                        cleaned_after, tool_calls = parse_tool_calls(tool_buffer, tools=req.tools)
+'''
+    stream_new = '''                    finish_reason = (
+                        "length" if completion_tokens >= gen_len else "stop"
+                    )
+                    if mode == "tool_buffer":
+                        cleaned_after, tool_calls = parse_tool_calls(tool_buffer, tools=req.tools)
+'''
+    if non_stream_old not in source or stream_old not in source:
+        raise RuntimeError("unsupported Luce build_app source shape for finish_reason patch")
 
-    def patched(text: str, thinking_enabled: bool = True) -> tuple[str, str | None]:
-        clean, reasoning = parse(text, thinking_enabled=thinking_enabled)
-        if not clean and reasoning:
-            return reasoning, reasoning
-        return clean, reasoning
+    patched_source = source.replace(non_stream_old, non_stream_new, 1).replace(
+        stream_old,
+        stream_new,
+        1,
+    )
+    namespace = dict(luce.__dict__)
+    exec(patched_source, namespace)
+    luce.build_app = namespace["build_app"]
+    luce._easyllama_finish_reason_patched = True
 
-    luce.parse_reasoning = patched
-    luce._easyllama_content_fallback_patched = True
+
+class ChatRequestBudgetMiddleware:
+    def __init__(self, app: Any, extra_tokens: int) -> None:
+        self.app = app
+        self.extra_tokens = extra_tokens
+
+    @staticmethod
+    def _wrap_receive(body: bytes, original_receive: Any) -> Any:
+        sent = False
+
+        async def receive() -> dict[str, Any]:
+            nonlocal sent
+            if not sent:
+                sent = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            return await original_receive()
+
+        return receive
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if (
+            self.extra_tokens <= 0
+            or scope.get("type") != "http"
+            or scope.get("method") != "POST"
+            or scope.get("path") != "/v1/chat/completions"
+        ):
+            await self.app(scope, receive, send)
+            return
+
+        headers = dict(scope.get("headers", []))
+        content_type = headers.get(b"content-type", b"").decode("latin-1")
+        if "application/json" not in content_type:
+            await self.app(scope, receive, send)
+            return
+
+        chunks: list[bytes] = []
+        more_body = True
+        while more_body:
+            message = await receive()
+            if message["type"] != "http.request":
+                await self.app(scope, self._wrap_receive(b"".join(chunks), receive), send)
+                return
+            chunks.append(message.get("body", b""))
+            more_body = message.get("more_body", False)
+
+        body = b"".join(chunks)
+        try:
+            payload = json.loads(body)
+        except (TypeError, ValueError):
+            await self.app(scope, self._wrap_receive(body, receive), send)
+            return
+
+        if not isinstance(payload, dict):
+            await self.app(scope, self._wrap_receive(body, receive), send)
+            return
+
+        max_tokens = payload.get("max_tokens")
+        if not isinstance(max_tokens, int) or max_tokens <= 0:
+            alt_max_tokens = payload.get("max_completion_tokens")
+            if isinstance(alt_max_tokens, int) and alt_max_tokens > 0:
+                max_tokens = alt_max_tokens
+            else:
+                max_tokens = FALLBACK_CHAT_MAX_TOKENS
+
+        kwargs = payload.get("chat_template_kwargs")
+        if isinstance(kwargs, dict) and kwargs.get("enable_thinking") is False:
+            await self.app(scope, self._wrap_receive(body, receive), send)
+            return
+
+        payload["max_tokens"] = max_tokens + self.extra_tokens
+        new_body = json.dumps(payload).encode("utf-8")
+        new_scope = dict(scope)
+        new_headers = [
+            (key, value)
+            for key, value in scope.get("headers", [])
+            if key.lower() != b"content-length"
+        ]
+        new_headers.append((b"content-length", str(len(new_body)).encode("ascii")))
+        new_scope["headers"] = new_headers
+        await self.app(new_scope, self._wrap_receive(new_body, receive), send)
+
+
+def install_chat_request_budget_middleware(app: Any, extra_tokens: int) -> None:
+    if extra_tokens <= 0 or getattr(app, "_easyllama_chat_request_budget_middleware", False):
+        return
+    app.add_middleware(ChatRequestBudgetMiddleware, extra_tokens=extra_tokens)
+    app._easyllama_chat_request_budget_middleware = True
 
 
 @lru_cache(maxsize=1)
@@ -40,10 +167,10 @@ def load_luce() -> tuple[Any, Any, Any]:
         sys.path.insert(0, str(LUCE_SCRIPTS))
 
     from fastapi.responses import JSONResponse
-    import server_tools as luce
+    import server_tools as luce  # pyright: ignore[reportMissingImports]
     from transformers import AutoTokenizer
 
-    fix_reasoning(luce)
+    patch_luce_finish_reason(luce)
     return luce, JSONResponse, AutoTokenizer
 
 
@@ -121,6 +248,15 @@ class LuceboxServer(ServerBase):
         parser.add_argument("--bin", type=Path, default=luce.DEFAULT_BIN if luce else FALLBACK_BIN)
         parser.add_argument(
             "--budget", type=int, default=luce.DEFAULT_BUDGET if luce else FALLBACK_BUDGET
+        )
+        parser.add_argument(
+            "--thinking-budget-extra",
+            type=int,
+            default=FALLBACK_THINKING_BUDGET_EXTRA,
+            help=(
+                "Extra generation tokens to reserve when thinking is enabled "
+                "so final content is not cut off."
+            ),
         )
         parser.add_argument(
             "--max-ctx",
@@ -318,6 +454,7 @@ class LuceboxServer(ServerBase):
             prefill_cfg=prefill if prefill.enabled else None,
             drafter_tokenizer=drafter_tok,
         )
+        install_chat_request_budget_middleware(app, args.thinking_budget_extra)
 
         @app.get("/health")
         def health() -> Any:
@@ -333,6 +470,7 @@ class LuceboxServer(ServerBase):
                 "draft": draft,
                 "bin": args.bin,
                 "budget": args.budget,
+                "thinking_budget_extra": args.thinking_budget_extra,
                 "ctx": args.max_ctx,
                 "tokenizer": args.tokenizer,
                 "prefill": prefill,
@@ -347,6 +485,7 @@ class LuceboxServer(ServerBase):
         self.log.info("Draft weights: %s", spec.data["draft"])
         self.log.info("Binary: %s", spec.data["bin"])
         self.log.info("Budget: %s", spec.data["budget"])
+        self.log.info("Thinking budget extra: %s", spec.data["thinking_budget_extra"])
         self.log.info("Max ctx: %s", spec.data["ctx"])
         self.log.info("Tokenizer: %s", spec.data["tokenizer"])
         if prefill.enabled:

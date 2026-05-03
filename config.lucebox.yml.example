@@ -68,6 +68,7 @@ macros:
   dflash_pflash_alpha: "0.85"
   dflash_pflash_profile: ""
   dflash_budget: "22"
+  dflash_thinking_budget_extra: "8192"
   dflash_max_ctx: "131072"
   dflash_fa_window: "0"
   dflash_prefill_compression: "auto"
@@ -88,6 +89,7 @@ models:
       --target-hf ${qwen3_chat_target_hf}
       --draft-hf ${qwen3_chat_draft_hf}
       --budget ${dflash_budget}
+      --thinking-budget-extra ${dflash_thinking_budget_extra}
       --max-ctx ${dflash_max_ctx}
       ${dflash_cache_args}
       --fa-window ${dflash_fa_window}
