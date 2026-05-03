@@ -68,7 +68,7 @@ macros:
   dflash_pflash_alpha: "0.85"
   dflash_pflash_profile: ""
   dflash_budget: "22"
-  dflash_max_ctx: "16384"
+  dflash_max_ctx: "131072"
   dflash_fa_window: "0"
   dflash_prefill_compression: "auto"
   dflash_prefill_threshold: "32000"
