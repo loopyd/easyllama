@@ -5,6 +5,25 @@ https://github.com/loopyd/easyllama/releases
 
 Format follows Keep a Changelog style where possible, based on published release notes.
 
+## [v0.3.5] - 2026-05-04
+
+Patch release focused on Spiritbuun completion-budget forwarding.
+
+### Fixed
+
+- Normalized `max_completion_tokens` into upstream `max_tokens` in the Spiritbuun proxy when clients omit `max_tokens`, preventing abrupt early stops from upstream default generation limits.
+
+### Validation
+
+- Re-ran the Spiritbuun request sanitizer against a `max_completion_tokens`-only payload and verified it forwards `max_tokens` upstream.
+- Rebuilt, restarted, and warmed the `spiritbuun` runtime successfully.
+- Verified `GET /health`, `GET /v1/models`, `GET /ui/`, `POST /v1/chat/completions`, `POST /v1/messages`, `POST /v1/completions`, `POST /v1/responses`, `POST /v1/embeddings`, and `POST /v1/rerank` against the live runtime.
+
+### Links
+
+- Release: https://github.com/loopyd/easyllama/releases/tag/v0.3.5
+- Compare: https://github.com/loopyd/easyllama/compare/v0.3.4...v0.3.5
+
 ## [v0.3.4] - 2026-05-04
 
 Patch release focused on Spiritbuun request handling, context defaults, and API parity.

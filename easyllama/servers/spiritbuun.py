@@ -132,6 +132,13 @@ def sanitize_chat_request_body(body: bytes) -> tuple[bytes, bool]:
         payload["reasoning"] = "off"
         changed = True
 
+    max_tokens = payload.get("max_tokens")
+    if not isinstance(max_tokens, int) or max_tokens <= 0:
+        alt_max_tokens = payload.get("max_completion_tokens")
+        if isinstance(alt_max_tokens, int) and alt_max_tokens > 0:
+            payload["max_tokens"] = alt_max_tokens
+            changed = True
+
     kwargs = payload.get("chat_template_kwargs")
     normalized_kwargs = dict(kwargs) if isinstance(kwargs, dict) else {}
     if normalized_kwargs.get("enable_thinking") is not False:
