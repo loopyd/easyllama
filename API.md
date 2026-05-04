@@ -62,7 +62,7 @@ Read this table first if choosing route by task or by mode.
 | `GET /health` | ✅ | ✅ | ✅ | ✅ | Plain-text health check |
 | `GET /v1/models` | ✅ | ✅ | ✅ | ✅ | Lists configured model IDs |
 | `POST /v1/chat/completions` | ✅ | ✅ | ✅ | ✅ | Main OpenAI-compatible chat route |
-| `POST /v1/messages` | ❌ | ❌ | ❌ | ✅ | Lucebox-only messages route |
+| `POST /v1/messages` | ❌ | ❌ | ✅ | ✅ | Anthropic-style messages route; proxied in `spiritbuun` |
 | `POST /v1/completions` | ✅ | ✅ | ✅ | ✅ | Good fit for `qmd-generate` |
 | `POST /v1/responses` | ✅ | ✅ | ✅ | ✅ | Good fit for `qmd-generate` |
 | `POST /v1/embeddings` | ✅ | ✅ | ✅ | ✅ | Use `qwen3-embeddings` or `qmd-embed` |
@@ -73,7 +73,7 @@ Important:
 
 - `qmd-rerank` is rerank-only.
 - `qmd-generate` is generation model for `/v1/completions` and `/v1/responses`.
-- `POST /v1/messages` only exists in `lucebox` mode.
+- `POST /v1/messages` exists in `spiritbuun` and `lucebox`.
 
 ## Fast smoke tests
 
@@ -107,7 +107,7 @@ curl -sS "${AUTH[@]}" \
   http://127.0.0.1:8080/v1/chat/completions | jq
 ```
 
-### Messages (`lucebox` only)
+### Messages (`spiritbuun`, `lucebox`)
 
 ```bash
 curl -sS "${AUTH[@]}" \
@@ -172,7 +172,7 @@ Shortest route map for common client tasks.
 | Goal | Endpoint | Model |
 | --- | --- | --- |
 | Chat | `POST /v1/chat/completions` | `qwen3-chat` |
-| Lucebox native-style chat | `POST /v1/messages` | `qwen3-chat` |
+| Messages-style chat (`spiritbuun`, `lucebox`) | `POST /v1/messages` | `qwen3-chat` |
 | Plain completion / rewrite | `POST /v1/completions` or `POST /v1/responses` | `qmd-generate` |
 | Embeddings | `POST /v1/embeddings` | `qwen3-embeddings` or `qmd-embed` |
 | Reranking | `POST /v1/rerank` | `qmd-rerank` |

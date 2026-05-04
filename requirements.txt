@@ -1,6 +1,9 @@
 colorama
 docker
 fastapi
+h11
+h2
+httpx
 huggingface_hub
 jinja2
 protobuf

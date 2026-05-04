@@ -5,6 +5,32 @@ https://github.com/loopyd/easyllama/releases
 
 Format follows Keep a Changelog style where possible, based on published release notes.
 
+## [v0.3.4] - 2026-05-04
+
+Patch release focused on Spiritbuun request handling, context defaults, and API parity.
+
+### Fixed
+
+- Added a Spiritbuun FastAPI proxy that strips hidden reasoning content and thinking flags before forwarding chat-style requests upstream, preventing oversized preserved-thinking payloads from tripping context-limit failures.
+- Switched the Spiritbuun proxy lifecycle from deprecated `FastAPI.on_event` hooks to a lifespan handler and corrected the catch-all route declaration so the server starts cleanly.
+
+### Changed
+
+- Raised the tracked Spiritbuun example context size to `262144`, enabled `--context-shift`, and stripped client-side reasoning/template params in the shipped example config.
+- Added Spiritbuun runtime HTTP dependencies: `httpx`, `h11`, and `h2`.
+- Documented `POST /v1/messages` support for `spiritbuun` in the API reference.
+
+### Validation
+
+- Rebuilt and restarted the `spiritbuun` image successfully.
+- Verified `GET /health`, `GET /v1/models`, `GET /ui/`, `POST /v1/chat/completions`, `POST /v1/messages`, `POST /v1/completions`, `POST /v1/responses`, `POST /v1/embeddings`, and `POST /v1/rerank` against the live runtime.
+- Confirmed oversized hidden-reasoning regression cases now return `200` for both `POST /v1/chat/completions` and `POST /v1/messages`.
+
+### Links
+
+- Release: https://github.com/loopyd/easyllama/releases/tag/v0.3.4
+- Compare: https://github.com/loopyd/easyllama/compare/v0.3.3...v0.3.4
+
 ## [v0.3.2] - 2026-05-03
 
 Patch release focused on config hygiene and provider workflow tooling.
