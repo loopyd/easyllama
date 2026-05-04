@@ -51,6 +51,7 @@ class Settings:
     container_name: str
     host_port: int
     container_port: int
+    pids_limit: int
     models_dir: Path
     mmproj_dir: Path
     chat_template_dir: Path
@@ -186,6 +187,7 @@ def load_settings(
         container_name=os.environ.get("LLAMACPP_CONTAINER_NAME", str(defaults["container_name"])),
         host_port=int(os.environ.get("LLAMACPP_HOST_PORT", defaults["host_port"])),
         container_port=int(os.environ.get("LLAMACPP_CONTAINER_PORT", defaults["container_port"])),
+        pids_limit=int(defaults.get("pids_limit", 256)),
         models_dir=absolute_path(
             root_dir, os.environ.get("LLAMACPP_MODELS_DIR", str(defaults["models_dir"]))
         ),

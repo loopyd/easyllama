@@ -24,6 +24,7 @@ image_tag_base = "cuda13"
 container_name = "llamacpp-server-swap"
 host_port = 8080
 container_port = 8080
+pids_limit = 256
 models_dir = "models"
 mmproj_dir = "mmproj"
 chat_template_dir = "chat_template"

@@ -198,4 +198,7 @@ def main(argv: list[str] | None = None) -> int:
     if handler is None:
         parser.print_help()
         return 0
-    return handler(args, extra_args)
+    try:
+        return handler(args, extra_args)
+    except KeyboardInterrupt:
+        return 130

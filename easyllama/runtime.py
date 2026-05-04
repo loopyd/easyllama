@@ -230,6 +230,13 @@ class DockerRuntime:
                 return container
         return None
 
+    def get_running_container_count(self) -> int:
+        return sum(
+            1
+            for container in self.client.containers.list()
+            if container.name == self.settings.container_name
+        )
+
     def is_running(self) -> bool:
         container = self.get_container()
         return bool(container and container.status == "running")
@@ -335,6 +342,12 @@ class DockerRuntime:
         self.settings.models_dir.mkdir(parents=True, exist_ok=True)
         self.settings.mmproj_dir.mkdir(parents=True, exist_ok=True)
 
+        running_count = self.get_running_container_count()
+        if running_count > 1:
+            raise SystemExit(
+                f"refusing to start {self.settings.container_name}: found {running_count} running containers with same name"
+            )
+
         container = self.get_container()
         if container is not None and container.status == "running":
             running_mode = container.labels.get("easyllama.mode", "unknown")
@@ -389,6 +402,7 @@ class DockerRuntime:
             name=self.settings.container_name,
             restart_policy={"Name": "unless-stopped"},
             security_opt=["no-new-privileges"],
+            pids_limit=self.settings.pids_limit,
             runtime="nvidia",
             device_requests=[self.docker.types.DeviceRequest(count=-1, capabilities=[["gpu"]])],
             ports={f"{self.settings.container_port}/tcp": self.settings.host_port},
@@ -421,8 +435,12 @@ class DockerRuntime:
         container = self.get_container()
         if container is None:
             raise SystemExit(f"container {self.settings.container_name} does not exist")
-        for chunk in container.logs(stream=True, follow=True):
-            print(chunk.decode("utf-8", errors="replace"), end="")
+        try:
+            for chunk in container.logs(stream=True, follow=True):
+                print(chunk.decode("utf-8", errors="replace"), end="")
+        except KeyboardInterrupt:
+            LOGGER.info("log follow interrupted")
+            return 0
         return 0
 
     def status(self) -> int:

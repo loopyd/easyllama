@@ -50,11 +50,7 @@ macros:
   no_warmup: "--no-warmup"
   mmproj_arg: "${env.LLAMACPP_MMPROJ_ARG}"
   chat_template_file: "/chat_template/qwen3.6.jinja"
-  chat_template_kwargs: '{\"tokenize\":false,\"add_generation_prompt\":true,\"preserve_thinking\":true}'
-  reasoning: "on"
-  reasoning_format: "auto"
-  reasoning_budget: "4096"
-  reasoning_budget_message: '...\ output\ your\ final\ answer\ now.'
+  chat_template_kwargs: '{\"tokenize\":false,\"add_generation_prompt\":true,\"enable_thinking\":false,\"preserve_thinking\":false}'
   emb_cache_type_k: "f16"
   emb_cache_type_v: "f16"
   rerank_batch_size: "2048"
@@ -65,6 +61,14 @@ models:
   "qwen3-chat":
     name: "Pi Qwen3 Chat 27B Turboquant"
     description: "Primary chat/completions model with turboquant KV cache enabled"
+    filters:
+      setParams:
+        reasoning: "off"
+        chat_template_kwargs:
+          tokenize: false
+          add_generation_prompt: true
+          enable_thinking: false
+          preserve_thinking: false
     cmd: |
       ${server_bin}
       server
@@ -105,10 +109,7 @@ models:
       ${jinja_on}
       --chat-template-file ${chat_template_file}
       --chat-template-kwargs ${chat_template_kwargs}
-      --reasoning ${reasoning}
-      --reasoning-format ${reasoning_format}
-      --reasoning-budget ${reasoning_budget}
-      --reasoning-budget-message ${reasoning_budget_message}
+      --reasoning off
 
     env:
       - "HF_TOKEN=${env.HF_TOKEN}"
@@ -141,6 +142,14 @@ models:
   "qmd-generate":
     name: "QMD Query Expansion"
     description: "Alias for QMD query expansion and OpenAI-compatible completions"
+    filters:
+      setParams:
+        reasoning: "off"
+        chat_template_kwargs:
+          tokenize: false
+          add_generation_prompt: true
+          enable_thinking: false
+          preserve_thinking: false
     cmd: |
       ${server_bin}
       server
@@ -180,10 +189,7 @@ models:
       ${jinja_on}
       --chat-template-file ${chat_template_file}
       --chat-template-kwargs ${chat_template_kwargs}
-      --reasoning ${reasoning}
-      --reasoning-format ${reasoning_format}
-      --reasoning-budget ${reasoning_budget}
-      --reasoning-budget-message ${reasoning_budget_message}
+      --reasoning off
 
     env:
       - "HF_TOKEN=${env.HF_TOKEN}"
