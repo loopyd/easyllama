@@ -89,6 +89,7 @@ models:
       --target-hf ${qwen3_chat_target_hf}
       --draft-hf ${qwen3_chat_draft_hf}
       --ctx-size ${kv_ctx_size}
+      --keep -1
       --n-predict ${n_predict}
       --temp ${chat_temp}
       --batch-size ${chat_batch_size}
@@ -103,6 +104,7 @@ models:
       ${web_ui_off}
       ${no_warmup}
       ${no_mmap}
+      --context-shift
       --chat-template-kwargs ${chat_template_kwargs}
       --reasoning off
       -cd ${qwen3_chat_draft_context}

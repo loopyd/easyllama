@@ -345,7 +345,8 @@ class DockerRuntime:
         running_count = self.get_running_container_count()
         if running_count > 1:
             raise SystemExit(
-                f"refusing to start {self.settings.container_name}: found {running_count} running containers with same name"
+                f"refusing to start {self.settings.container_name}: found "
+                f"{running_count} running containers with same name"
             )
 
         container = self.get_container()

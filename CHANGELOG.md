@@ -5,6 +5,30 @@ https://github.com/loopyd/easyllama/releases
 
 Format follows Keep a Changelog style where possible, based on published release notes.
 
+## [v0.3.7] - 2026-05-04
+
+Patch release focused on Spiritbuun long-conversation continuity.
+
+### Fixed
+
+- Enabled `--keep -1` and `--context-shift` in the shipped Spiritbuun chat config so long multi-turn sessions can continue shifting context instead of stalling once the slot fills.
+
+### Changed
+
+- Kept `--ignore-eos` disabled for the default Spiritbuun chat profile after upstream review showed it is intended for infinite-text generation rather than standard chat turns.
+- Wrapped the duplicate-container startup error string in `easyllama/runtime.py` so the shipped host-side Ruff gate passes cleanly.
+
+### Validation
+
+- Ran `.github/skills/easyllama-provider/scripts/validate-code.sh` successfully.
+- Rebuilt, restarted, and warmed the `spiritbuun` runtime successfully.
+- Ran `.github/skills/easyllama-provider/scripts/test-public-endpoints.sh spiritbuun` successfully against the rebuilt runtime.
+
+### Links
+
+- Release: https://github.com/loopyd/easyllama/releases/tag/v0.3.7
+- Compare: https://github.com/loopyd/easyllama/compare/v0.3.6...v0.3.7
+
 ## [v0.3.6] - 2026-05-04
 
 Patch release focused on reverting the Spiritbuun proxy wrapper.
