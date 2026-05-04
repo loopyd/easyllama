@@ -73,7 +73,6 @@ models:
     name: "Pi Qwen3 Chat 27B Spiritbuun"
     description: "Primary chat/completions model using spiritbuun dflash with a published GGUF draft"
     filters:
-      stripParams: "chat_template_kwargs, thinking, thinking_budget_tokens, reasoning"
       setParams:
         reasoning: "off"
         chat_template_kwargs:
@@ -104,7 +103,6 @@ models:
       ${web_ui_off}
       ${no_warmup}
       ${no_mmap}
-      --context-shift
       --chat-template-kwargs ${chat_template_kwargs}
       --reasoning off
       -cd ${qwen3_chat_draft_context}

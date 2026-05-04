@@ -5,6 +5,29 @@ https://github.com/loopyd/easyllama/releases
 
 Format follows Keep a Changelog style where possible, based on published release notes.
 
+## [v0.3.6] - 2026-05-04
+
+Patch release focused on reverting the Spiritbuun proxy wrapper.
+
+### Fixed
+
+- Reverted the Spiritbuun FastAPI/httpx proxy wrapper and restored direct `llama-server` passthrough after proxy handling clobbered Spiritbuun tool and message results.
+
+### Changed
+
+- Removed proxy-only Spiritbuun request rewriting, dropped proxy-only Python dependencies (`httpx`, `h11`, `h2`), and aligned the shipped Spiritbuun config and API reference with the restored direct backend behavior.
+- Kept the higher tracked Spiritbuun context limit while removing the proxy-era launcher changes.
+
+### Validation
+
+- Rebuilt, restarted, and warmed the `spiritbuun` runtime successfully after the revert.
+- Verified `GET /health`, `GET /v1/models`, `GET /ui/`, `POST /v1/chat/completions`, `POST /v1/messages`, `POST /v1/completions`, `POST /v1/responses`, `POST /v1/embeddings`, and `POST /v1/rerank` against the live runtime.
+
+### Links
+
+- Release: https://github.com/loopyd/easyllama/releases/tag/v0.3.6
+- Compare: https://github.com/loopyd/easyllama/compare/v0.3.5...v0.3.6
+
 ## [v0.3.5] - 2026-05-04
 
 Patch release focused on Spiritbuun completion-budget forwarding.

@@ -62,7 +62,7 @@ Read this table first if choosing route by task or by mode.
 | `GET /health` | ✅ | ✅ | ✅ | ✅ | Plain-text health check |
 | `GET /v1/models` | ✅ | ✅ | ✅ | ✅ | Lists configured model IDs |
 | `POST /v1/chat/completions` | ✅ | ✅ | ✅ | ✅ | Main OpenAI-compatible chat route |
-| `POST /v1/messages` | ❌ | ❌ | ✅ | ✅ | Anthropic-style messages route; proxied in `spiritbuun` |
+| `POST /v1/messages` | ❌ | ❌ | ✅ | ✅ | Anthropic-style messages route |
 | `POST /v1/completions` | ✅ | ✅ | ✅ | ✅ | Good fit for `qmd-generate` |
 | `POST /v1/responses` | ✅ | ✅ | ✅ | ✅ | Good fit for `qmd-generate` |
 | `POST /v1/embeddings` | ✅ | ✅ | ✅ | ✅ | Use `qwen3-embeddings` or `qmd-embed` |
