@@ -5,6 +5,25 @@ https://github.com/loopyd/easyllama/releases
 
 Format follows Keep a Changelog style where possible, based on published release notes.
 
+## [v0.3.10] - 2026-05-05
+
+Patch release focused on the Qwen 3.6 tool-call template correction and version metadata alignment.
+
+### Fixed
+
+- Serialized only the function schema inside the Qwen 3.6 `<tools>` block so tool-aware clients no longer receive wrapper objects instead of callable definitions.
+- Emitted tool call IDs alongside assistant `<tool_call>` blocks and echoed `message.tool_call_id` inside `<tool_response>` blocks so tool responses can be matched back to the originating call.
+- Synced `easyllama.__version__` with the packaged project version.
+
+### Validation
+
+- Ran a narrow Python smoke test to confirm `pyproject.toml` and `easyllama.__version__` now match and that `chat_template/qwen3.6.jinja` still parses as a Jinja template after the tool-call updates.
+
+### Links
+
+- Release: https://github.com/loopyd/easyllama/releases/tag/v0.3.10
+- Compare: https://github.com/loopyd/easyllama/compare/v0.3.9...v0.3.10
+
 ## [v0.3.9] - 2026-05-05
 
 Patch release focused on catching mode-config regressions before rebuilds and shipping the cleaned Spiritbuun example macro layout.
