@@ -21,6 +21,7 @@ macros:
   qmd_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
   qmd_rerank_hf_model: "mradermacher/Qwen3-Reranker-8B-GGUF:Q5_K_M"
   n_predict: "8192"
+  qwen3_chat_n_predict: "-1"
   temp: "0.6"
   chat_temp: "0.2"
   top_k: "20"
@@ -90,7 +91,7 @@ models:
       --draft-hf ${qwen3_chat_draft_hf}
       --ctx-size ${kv_ctx_size}
       --keep -1
-      --n-predict ${n_predict}
+      --n-predict ${qwen3_chat_n_predict}
       --temp ${chat_temp}
       --batch-size ${chat_batch_size}
       --ubatch-size ${chat_ubatch_size}
@@ -100,6 +101,7 @@ models:
       --cache-type-v ${cache_type_v}
       --cache-type-k-draft ${qwen3_chat_draft_cache_type_k}
       --cache-type-v-draft ${qwen3_chat_draft_cache_type_v}
+      --cache-ram 0
       --gpu-layers-draft ${qwen3_chat_draft_gpu_layers}
       ${web_ui_off}
       ${no_warmup}

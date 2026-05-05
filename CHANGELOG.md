@@ -5,6 +5,26 @@ https://github.com/loopyd/easyllama/releases
 
 Format follows Keep a Changelog style where possible, based on published release notes.
 
+## [v0.3.8] - 2026-05-04
+
+Patch release focused on the Spiritbuun agent stall regression left behind by `v0.3.7`.
+
+### Fixed
+
+- Scoped Spiritbuun `qwen3-chat` to `--n-predict -1` so long agentic turns no longer inherit the shared `8192` token cap that could leave multi-step chats hanging mid-run.
+- Added `--cache-ram 0` to the shipped Spiritbuun DFlash chat launcher so the draft path stays on the intended cache configuration during extended agent sessions.
+
+### Validation
+
+- Ran `.github/skills/easyllama-provider/scripts/validate-code.sh` successfully.
+- Rebuilt, restarted, and warmed the `spiritbuun` runtime successfully.
+- Ran `.github/skills/easyllama-provider/scripts/test-public-endpoints.sh spiritbuun` successfully against the rebuilt runtime.
+
+### Links
+
+- Release: https://github.com/loopyd/easyllama/releases/tag/v0.3.8
+- Compare: https://github.com/loopyd/easyllama/compare/v0.3.7...v0.3.8
+
 ## [v0.3.7] - 2026-05-04
 
 Patch release focused on Spiritbuun long-conversation continuity.
