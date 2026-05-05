@@ -5,6 +5,32 @@ https://github.com/loopyd/easyllama/releases
 
 Format follows Keep a Changelog style where possible, based on published release notes.
 
+## [v0.3.9] - 2026-05-05
+
+Patch release focused on catching mode-config regressions before rebuilds and shipping the cleaned Spiritbuun example macro layout.
+
+### Fixed
+
+- Added a host-side mode YAML validator under `.github/skills/easyllama-provider/scripts/validate-config-yaml.sh` so provider workflows now fail fast on YAML parse errors, duplicate `macros:` keys, and unresolved `${...}` references before spending time on Docker builds.
+- Wired `.github/skills/easyllama-provider/scripts/rebuild-and-warmup.sh` to validate the effective mode config before `./run.sh --mode <mode> build`, exercising the same pre-build gate used during local provider validation.
+
+### Changed
+
+- Canonicalized `config.spiritbuun.yml.example` to the route-based macro schema already used by the active Spiritbuun config, keeping shared sampler flags centralized while preserving conservative shipped batch and completion defaults for the example.
+- Updated the `easyllama-provider` skill instructions to require mode-YAML validation ahead of rebuilds.
+
+### Validation
+
+- Ran `.github/skills/easyllama-provider/scripts/validate-code.sh` successfully.
+- Ran `.github/skills/easyllama-provider/scripts/validate-config-yaml.sh` successfully against `config.spiritbuun.yml` and `config.spiritbuun.yml.example`.
+- Rebuilt, restarted, and warmed the `spiritbuun` runtime successfully through `.github/skills/easyllama-provider/scripts/rebuild-and-warmup.sh`, confirming the new pre-build validator runs in the live workflow.
+- Ran `.github/skills/easyllama-provider/scripts/test-public-endpoints.sh spiritbuun` successfully against the rebuilt runtime.
+
+### Links
+
+- Release: https://github.com/loopyd/easyllama/releases/tag/v0.3.9
+- Compare: https://github.com/loopyd/easyllama/compare/v0.3.8...v0.3.9
+
 ## [v0.3.8] - 2026-05-04
 
 Patch release focused on the Spiritbuun agent stall regression left behind by `v0.3.7`.

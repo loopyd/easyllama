@@ -62,26 +62,32 @@ Create or update a provider mode for this repository without reintroducing hardc
 
    If the repo lacks dedicated unit tests for the provider path, treat diagnostics plus the runtime endpoint suite as the required gate.
 
-7. Rebuild and warm the provider mode.
+7. Validate the mode YAML before any rebuild.
+
+   Use the [mode YAML validation script](./scripts/validate-config-yaml.sh) against the config that live validation will actually use for that mode. It fails fast on YAML parse errors, duplicate macro keys in `macros:`, and unresolved `${...}` references other than `${PORT}` and `${env.*}`.
+
+   The [rebuild and warmup script](./scripts/rebuild-and-warmup.sh) runs this check automatically before `./run.sh --mode <mode> build`, so fix config issues there before spending time on Docker rebuilds.
+
+8. Rebuild and warm the provider mode.
 
    Use the [rebuild and warmup script](./scripts/rebuild-and-warmup.sh). Pass the mode name as the first argument and optional model IDs after it. If you omit model IDs, the script warms every model currently exposed by `/v1/models`.
 
    Rebuild whenever Python runtime code, Docker targets, launcher code, or config-loading behavior changed, because the runtime is baked into the image.
 
-8. Run the public endpoint regression suite.
+9. Run the public endpoint regression suite.
 
    Use the [public endpoint regression script](./scripts/test-public-endpoints.sh). Pass the mode name as the first argument. The script covers `GET /health`, `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/completions`, `POST /v1/responses`, both `POST /v1/embeddings` aliases, `POST /v1/rerank`, and `GET /ui/`. It automatically checks `POST /v1/messages` for `lucebox`, and you can force that route for another provider with `--messages`.
 
    The script validates minimal response shape, not just status codes: advertised model IDs, assistant content for chat-style responses, non-empty embedding vectors with matching dimensions across aliases, and one rerank result per input document.
 
-9. If validation fails, debug locally before expanding scope.
+10. If validation fails, debug locally before expanding scope.
 
    - Confirm the active mode and config path actually being used.
    - Rebuild again if the failing behavior depends on Python runtime code.
    - Isolate the backend command on a scratch port if the failure is provider-specific.
    - Trim inherited launch flags toward the provider's minimal working surface and re-run the same failing endpoint until the regression is explained.
 
-10. Completion criteria.
+11. Completion criteria.
 
    The provider integration is done when all of the following are true:
 
