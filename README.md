@@ -6,18 +6,24 @@ Project goal: one host command surface, one public port, one shared model cache,
 
 ## Contents
 
-- [At glance](#at-glance)
-- [Modes](#modes)
-- [System requirements](#system-requirements)
-- [Install](#install)
-- [Quick start](#quick-start)
-- [Common commands](#common-commands)
-- [File map](#file-map)
-- [Environment overrides](#environment-overrides)
-- [Reader path](#reader-path)
-- [Troubleshooting](#troubleshooting)
-- [Contributing](#contributing)
-- [License](#license)
+- [easy llama(cpp)](#easy-llamacpp)
+  - [Contents](#contents)
+  - [At glance](#at-glance)
+  - [Modes](#modes)
+  - [System requirements](#system-requirements)
+  - [Install](#install)
+  - [Quick start](#quick-start)
+    - [1. Create credentials](#1-create-credentials)
+    - [2. Copy mode config templates](#2-copy-mode-config-templates)
+    - [3. Build, start, warm](#3-build-start-warm)
+    - [4. Verify runtime](#4-verify-runtime)
+  - [Common commands](#common-commands)
+  - [File map](#file-map)
+  - [Environment overrides](#environment-overrides)
+  - [Reader path](#reader-path)
+  - [Troubleshooting](#troubleshooting)
+  - [Contributing](#contributing)
+  - [License](#license)
 
 ## At glance
 
@@ -34,10 +40,13 @@ Why reader cares:
 
 Pick mode by backend behavior, not by install flow. Setup path stays same.
 
+- Mode-specific defaults live in the tracked templates under `config/`.
+
 | Mode | Best for | `qwen3-chat` backend | Default chat weights | Extra API surface |
 | --- | --- | --- | --- | --- |
 | `basic` | Plain llama.cpp path | `llama-server-basic` | `unsloth/Qwen3.6-27B-GGUF:Q4_K_M` | none |
 | `turboquant` | Turboquant KV-cache experiments | `llama-server-turboquant` | `HauhauCS/Qwen3.6-27B-Uncensored-HauhauCS-Aggressive:Q5_K_P` | none |
+| `mtp` | MTP experiments (separate llama.cpp fork/config) | `llama-server-basic` (runtime mode) | `havenoammo/Qwen3.6-27B-MTP-UD-GGUF:Qwen3.6-27B-MTP-UD-Q6_K_XL.gguf` | none |
 | `spiritbuun` | buun-llama-cpp DFlash experiments | `easyllama server spiritbuun` | `unsloth/Qwen3.6-27B-GGUF:Q5_K_M` + `Ardenzard/Qwen3.6-27B-DFlash-GGUF:Qwen3.6-27B-DFlash-Q5_K_M.gguf` | none |
 | `lucebox` | Luce dflash/pflash experiments | `easyllama server lucebox` | `unsloth/Qwen3.6-27B-GGUF:Q4_K_M` + `KingsonHO/Qwen3.6-27B-DFlash:model.safetensors` | `POST /v1/messages` |
 
@@ -88,16 +97,17 @@ Set:
 ### 2. Copy mode config templates
 
 ```bash
-cp config.basic.yml.example config.basic.yml
-cp config.turboquant.yml.example config.turboquant.yml
-cp config.spiritbuun.yml.example config.spiritbuun.yml
-cp config.lucebox.yml.example config.lucebox.yml
+cp config/config.basic.yml.example config/config.basic.yml
+cp config/config.turboquant.yml.example config/config.turboquant.yml
+cp config/config.spiritbuun.yml.example config/config.spiritbuun.yml
+cp config/config.mtp.yml.example config/config.mtp.yml
+cp config/config.lucebox.yml.example config/config.lucebox.yml
 ```
 
 Edit configs as needed. For more config detail, see `llama-swap` docs:
-https://github.com/mostlygeek/llama-swap/blob/main/docs/configuration.md
+[llama-swap configuration docs](https://github.com/mostlygeek/llama-swap/blob/main/docs/configuration.md)
 
-If `config.<mode>.yml` does not exist, `run.sh` falls back to matching example file.
+If `config/config.<mode>.yml` does not exist, `run.sh` falls back to the matching example file in `config/`.
 
 ### 3. Build, start, warm
 
@@ -157,14 +167,16 @@ Most-used host commands through `./run.sh`.
 | `run.sh` | Host and container entrypoint |
 | `auth.json` | Local Hugging Face token and optional API key |
 | `auth.json.example` | Credential template |
-| `config.basic.yml` | Editable config for `basic` |
-| `config.turboquant.yml` | Editable config for `turboquant` |
-| `config.spiritbuun.yml` | Editable config for `spiritbuun` |
-| `config.lucebox.yml` | Editable config for `lucebox` |
-| `config.basic.yml.example` | Tracked `basic` template |
-| `config.turboquant.yml.example` | Tracked `turboquant` template |
-| `config.spiritbuun.yml.example` | Tracked `spiritbuun` template |
-| `config.lucebox.yml.example` | Tracked `lucebox` template |
+| `config/config.basic.yml` | Editable config for `basic` |
+| `config/config.turboquant.yml` | Editable config for `turboquant` |
+| `config/config.spiritbuun.yml` | Editable config for `spiritbuun` |
+| `config/config.mtp.yml` | Editable config for `mtp` |
+| `config/config.lucebox.yml` | Editable config for `lucebox` |
+| `config/config.basic.yml.example` | Tracked `basic` template |
+| `config/config.turboquant.yml.example` | Tracked `turboquant` template |
+| `config/config.spiritbuun.yml.example` | Tracked `spiritbuun` template |
+| `config/config.mtp.yml.example` | Tracked `mtp` template |
+| `config/config.lucebox.yml.example` | Tracked `lucebox` template |
 | `models/` | Shared Hugging Face cache |
 | `mmproj/` | Shared mmproj assets |
 | `chat_template/` | Mounted chat templates |
@@ -176,7 +188,7 @@ Most-used host commands through `./run.sh`.
 
 | Variable | Purpose |
 | --- | --- |
-| `LLAMACPP_MODE` | Select `basic`, `turboquant`, `spiritbuun`, or `lucebox` |
+| `LLAMACPP_MODE` | Select `basic`, `turboquant`, `mtp`, `spiritbuun`, or `lucebox` |
 | `LLAMACPP_LS_CONFIG_FILE` | Use explicit config file instead of mode lookup |
 | `LLAMACPP_HOST_PORT` | Change published host port |
 | `LLAMACPP_AUTH_FILE` | Use different auth JSON file |

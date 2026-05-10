@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "easyllama"
-version = "0.3.10"
+version = "0.3.11"
 description = "Mode-aware local llama.cpp runner with llama-swap, turboquant, MTP, Spiritbuun, and Luce support"
 requires-python = ">=3.11"
 dynamic = ["dependencies"]
@@ -44,16 +44,16 @@ cuda_default_architectures = "120"
 log_level = "debug"
 
 [tool.easyllama.configs]
-basic = "config.basic.yml"
-basic_example = "config.basic.yml.example"
-turboquant = "config.turboquant.yml"
-turboquant_example = "config.turboquant.yml.example"
-spiritbuun = "config.spiritbuun.yml"
-spiritbuun_example = "config.spiritbuun.yml.example"
-mtp = "config.mtp.yml"
-mtp_example = "config.mtp.yml.example"
-lucebox = "config.lucebox.yml"
-lucebox_example = "config.lucebox.yml.example"
+basic = "config/config.basic.yml"
+basic_example = "config/config.basic.yml.example"
+turboquant = "config/config.turboquant.yml"
+turboquant_example = "config/config.turboquant.yml.example"
+spiritbuun = "config/config.spiritbuun.yml"
+spiritbuun_example = "config/config.spiritbuun.yml.example"
+mtp = "config/config.mtp.yml"
+mtp_example = "config/config.mtp.yml.example"
+lucebox = "config/config.lucebox.yml"
+lucebox_example = "config/config.lucebox.yml.example"
 
 [tool.ruff]
 target-version = "py311"

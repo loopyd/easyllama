@@ -1,0 +1,12 @@
+You are evaluating style consistency across cache-quant changes.
+
+Answer in exactly four short sentences.
+
+Topic: Explain how a smaller KV cache format can change long-context behavior while leaving model weights unchanged.
+
+Constraints:
+- Sentence 1 must begin with `KV cache precision`.
+- Sentence 2 must contain the phrase `attention history`.
+- Sentence 3 must mention one possible upside for `memory headroom`.
+- Sentence 4 must end with `measure it.`
+- Keep the overall tone plain, technical, and concise.

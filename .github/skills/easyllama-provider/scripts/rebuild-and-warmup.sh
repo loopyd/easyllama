@@ -13,28 +13,27 @@ shift
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../../../.." && pwd)"
 
+if [[ -x "${REPO_ROOT}/.venv/bin/python" ]]; then
+  DEFAULT_PYTHON="${REPO_ROOT}/.venv/bin/python"
+else
+  DEFAULT_PYTHON="python3"
+fi
+PYTHON_BIN="${PYTHON_BIN:-${DEFAULT_PYTHON}}"
+
 resolve_config_path() {
   if [[ -n "${LLAMACPP_LS_CONFIG_FILE:-}" ]]; then
     printf '%s\n' "${LLAMACPP_LS_CONFIG_FILE}"
     return 0
   fi
 
-  local active_config="config.${MODE}.yml"
-  local example_config="${active_config}.example"
+  MODE_NAME="${MODE}" "${PYTHON_BIN}" - <<'PY'
+import os
 
-  if [[ -f "${active_config}" ]]; then
-    printf '%s\n' "${active_config}"
-    return 0
-  fi
+from easyllama.config import load_settings, resolve_ls_config
 
-  if [[ -f "${example_config}" ]]; then
-    printf '%s\n' "${example_config}"
-    return 0
-  fi
-
-  printf '%s\n' \
-    "no llama-swap config found for ${MODE} mode; set LLAMACPP_LS_CONFIG_FILE or create ${active_config} from ${example_config}" >&2
-  return 1
+mode = os.environ["MODE_NAME"]
+print(resolve_ls_config(load_settings(mode_override=mode)))
+PY
 }
 
 cd "${REPO_ROOT}"

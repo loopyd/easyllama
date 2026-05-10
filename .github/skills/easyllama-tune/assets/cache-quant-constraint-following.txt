@@ -1,0 +1,12 @@
+You are evaluating instruction-following stability.
+
+Write exactly three bullet lines.
+
+Constraints:
+- Every line must start with `- `.
+- Each line must contain between 8 and 12 words.
+- The first line must mention `latency`.
+- The second line must mention `memory`.
+- The third line must mention `quality`.
+- Do not use the words `optimize`, `balanced`, or `tradeoff`.
+- Do not add any text before or after the three bullets.

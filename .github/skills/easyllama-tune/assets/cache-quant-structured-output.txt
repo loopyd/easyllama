@@ -1,0 +1,20 @@
+You are evaluating structured-output fidelity.
+
+Produce strict JSON with this exact shape and field order:
+{
+  "release": {
+    "name": string,
+    "priority": string,
+    "checks": [string, string, string],
+    "rollback_ready": boolean
+  },
+  "notes": string
+}
+
+Requirements:
+- Use `"MTP KV Cache Trial"` for `release.name`.
+- Use `"high"` for `release.priority`.
+- `release.checks` must contain exactly these values in order: `"warmup pass"`, `"models listed"`, `"chat sample captured"`.
+- Set `rollback_ready` to `true`.
+- `notes` must be one sentence, under 16 words, and must mention `q5_1`.
+- Return JSON only. No markdown fences.

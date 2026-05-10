@@ -41,8 +41,8 @@ Create or update a provider mode for this repository without reintroducing hardc
 3. Wire project defaults and config files.
 
    - Update `pyproject.toml` defaults for new repo/ref settings when the provider introduces new upstream sources.
-   - Add `config.<provider>.yml.example` and make sure the mode can resolve its active and example config paths.
-   - If live validation needs pinned local settings, copy the example to an ignored `config.<provider>.yml`, but keep the tracked example as the release artifact.
+   - Add `config/config.<provider>.yml.example` and make sure the mode can resolve its active and example config paths.
+   - If live validation needs pinned local settings, copy the example to an ignored `config/config.<provider>.yml`, but keep the tracked example as the release artifact.
 
 4. Add Docker build and runtime targets.
 

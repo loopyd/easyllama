@@ -1,16 +1,8 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/mostlygeek/llama-swap/refs/heads/main/config-schema.json
 #
-# Local runtime configuration for MTP mode. This file is ignored by git.
-# Update values here without changing the tracked config.mtp.yml.example
-# template.
-#
-# MTP (Multi-Token Prediction) via am17an/llama.cpp mtp-clean branch.
-# Enables speculative decoding with MTP heads for 2x+ throughput on Qwen3.6 models.
-#
-# Usage:
-#   cp config.mtp.yml.example config.mtp.yml
-#   # Edit config.mtp.yml with your settings
-#   ./run.sh server basic --runtime-mode mtp -f config.mtp.yml
+# Copy this file to config/config.spiritbuun.yml for local edits and overrides.
+# Use this mode with ./run.sh --mode spiritbuun start when you want the
+# spiritbuun/buun-llama-cpp qwen3-chat path with a published DFlash GGUF draft.
 
 healthCheckTimeout: 1800
 logLevel: info
@@ -20,55 +12,81 @@ globalTTL: 0
 # Shared llama-server argument macros
 macros:
   server_bin: "/opt/venv/bin/easyllama"
-  llama_server_bin: "/app/bin/llama-server-mtp"
-  kv_ctx_size: "131072"
-  qwen3_chat_target_hf: "havenoammo/Qwen3.6-27B-MTP-UD-GGUF:Qwen3.6-27B-MTP-UD-Q6_K_XL"
-  pi_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
+  llama_server_bin: "/app/bin/llama-server-spiritbuun"
+  chat_ctx_size: "262144"
+  emb_ctx_size: "262144"
+  qmd_chat_ctx_size: "262144"
+  qmd_emb_ctx_size: "262144"
+  qmd_rerank_ctx_size: "4096"
+  chat_hf_model: "unsloth/Qwen3.6-27B-GGUF:Q5_K_M"
+  draft_hf_model: "Ardenzard/Qwen3.6-27B-DFlash-GGUF:Qwen3.6-27B-DFlash-Q5_K_M.gguf"
+  emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
   qmd_chat_hf_model: "tobil/qmd-query-expansion-1.7B-gguf:Q8_0"
   qmd_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
   qmd_rerank_hf_model: "mradermacher/Qwen3-Reranker-8B-GGUF:Q5_K_M"
-  n_predict: "-1"
-  temp: "0.7"
+  chat_n_predict: "-1"
+  qmd_chat_n_predict: "8192"
+  chat_temp: "0.7"
+  qmd_chat_temp: "0.6"
   top_k: "20"
-  top_p: "0.80"
+  top_p: "0.95"
   min_p: "0.0"
   sampler_seq: "edskypmxt"
   repeat_last_n: "512"
-  repeat_penalty: "1.0"
+  repeat_penalty: "1.05"
   presence_penalty: "1.5"
   frequency_penalty: "0.0"
   dry_multiplier: "0.0"
   dry_base: "1.75"
   dry_allowed_length: "2"
-  dry_penalty_last_n: "512"
-  batch_size: "2048"
-  ubatch_size: "1024"
+  dry_penalty_last_n: "2048"
+  chat_batch_size: "256"
+  chat_ubatch_size: "64"
+  emb_batch_size: "1024"
+  emb_ubatch_size: "256"
+  qmd_chat_batch_size: "1024"
+  qmd_chat_ubatch_size: "256"
+  qmd_emb_batch_size: "1024"
+  qmd_emb_ubatch_size: "256"
+  qmd_rerank_batch_size: "2048"
+  qmd_rerank_ubatch_size: "2048"
   parallel: "1"
   flash_attn: "on"
   fit: "on"
-  cache_type_k: "default"
-  cache_type_v: "default"
-  poll: "1"
-  no_mmap: "--no-mmap"
-  web_ui_off: "--no-webui"
-  no_warmup: "--no-warmup"
-  jinja_on: "--jinja"
-  chat_template_file: "/chat_template/qwen3.6.jinja"
-  chat_template_kwargs: '{\"tokenize\":false,\"add_generation_prompt\":true,\"enable_thinking\":false,\"preserve_thinking\":false}'
+  chat_cache_type_k: "turbo4"
+  chat_cache_type_v: "turbo4"
   emb_cache_type_k: "f16"
   emb_cache_type_v: "f16"
-  rerank_batch_size: "2048"
-  rerank_ubatch_size: "2048"
-  rerank_ctx_size: "4096"
-
-  # MTP-specific speculative decoding parameters
-  spec_type: "mtp"
-  spec_draft_n_max: "3"
+  draft_cache_type_k: "f16"
+  draft_cache_type_v: "f16"
+  qmd_chat_cache_type_k: "turbo4"
+  qmd_chat_cache_type_v: "turbo4"
+  qmd_emb_cache_type_k: "f16"
+  qmd_emb_cache_type_v: "f16"
+  qmd_rerank_cache_type_k: "f16"
+  qmd_rerank_cache_type_v: "f16"
+  poll: "1"
+  no_mmap: "--no-mmap"
+  kv_unified: "--kv-unified"
+  cache_idle_slots: "--cache-idle-slots"
+  backend_sampling: "--backend-sampling"
+  web_ui_off: "--no-webui"
+  jinja_on: "--jinja"
+  no_warmup: "--no-warmup"
+  mmproj_arg: "${env.LLAMACPP_MMPROJ_ARG}"
+  chat_template_file: "/chat_template/qwen3.6.jinja"
+  chat_template_kwargs: '{\"tokenize\":false,\"add_generation_prompt\":true,\"enable_thinking\":false,\"preserve_thinking\":false}'
+  draft_context: "256"
+  draft_max: "8"
+  draft_min: "1"
+  draft_p_min: "0.75"
+  draft_gpu_layers: "all"
+  context_shift: "--context-shift"
 
 models:
   "qwen3-chat":
-    name: "Pi Qwen3 Chat 27B MTP"
-    description: "Primary chat/completions model with MTP speculative decoding enabled (2x+ throughput)"
+    name: "Pi Qwen3 Chat 27B Spiritbuun"
+    description: "Primary chat/completions model using spiritbuun dflash with a published GGUF draft"
     filters:
       setParams:
         reasoning: "off"
@@ -80,39 +98,35 @@ models:
     cmd: |
       ${server_bin}
       server
-      basic
+      spiritbuun
       --bin ${llama_server_bin}
       --port ${PORT}
-      -hf ${qwen3_chat_target_hf}
-      --ctx-size ${kv_ctx_size}
-      --n-predict ${n_predict}
-      --temp ${temp}
-      --top-k ${top_k}
-      --top-p ${top_p}
-      --min-p ${min_p}
-      --sampler-seq ${sampler_seq}
-      --repeat-last-n ${repeat_last_n}
-      --repeat-penalty ${repeat_penalty}
-      --presence-penalty ${presence_penalty}
-      --frequency-penalty ${frequency_penalty}
-      --dry-multiplier ${dry_multiplier}
-      --dry-base ${dry_base}
-      --dry-allowed-length ${dry_allowed_length}
-      --dry-penalty-last-n ${dry_penalty_last_n}
-      --batch-size ${batch_size}
-      --ubatch-size ${ubatch_size}
+      --target-hf ${chat_hf_model}
+      --draft-hf ${draft_hf_model}
+      --ctx-size ${chat_ctx_size}
+      --keep -1
+      --n-predict ${chat_n_predict}
+      --temp ${chat_temp}
+      --batch-size ${chat_batch_size}
+      --ubatch-size ${chat_ubatch_size}
       --parallel ${parallel}
-      --fit ${fit}
       --flash-attn ${flash_attn}
-      --cache-type-k ${cache_type_k}
-      --cache-type-v ${cache_type_v}
-      --spec-type ${spec_type}
-      --spec-draft-n-max ${spec_draft_n_max}
+      --cache-type-k ${chat_cache_type_k}
+      --cache-type-v ${chat_cache_type_v}
+      --cache-type-k-draft ${draft_cache_type_k}
+      --cache-type-v-draft ${draft_cache_type_v}
+      --cache-ram 0
+      --gpu-layers-draft ${draft_gpu_layers}
       ${web_ui_off}
+      ${no_warmup}
       ${no_mmap}
-      --poll ${poll}
+      ${context_shift}
       --chat-template-kwargs ${chat_template_kwargs}
       --reasoning off
+      -cd ${draft_context}
+      --draft-max ${draft_max}
+      --draft-min ${draft_min}
+      --draft-p-min ${draft_p_min}
 
     env:
       - "HF_TOKEN=${env.HF_TOKEN}"
@@ -126,14 +140,15 @@ models:
       basic
       --bin ${llama_server_bin}
       --port ${PORT}
-      -hf ${pi_emb_hf_model}
-      --ctx-size ${kv_ctx_size}
-      --batch-size ${batch_size}
-      --ubatch-size ${ubatch_size}
+      -hf ${emb_hf_model}
+      --ctx-size ${emb_ctx_size}
+      --batch-size ${emb_batch_size}
+      --ubatch-size ${emb_ubatch_size}
       --parallel ${parallel}
       --flash-attn ${flash_attn}
       --cache-type-k ${emb_cache_type_k}
       --cache-type-v ${emb_cache_type_v}
+      ${kv_unified}
       ${no_mmap}
       --embedding
       ${no_warmup}
@@ -145,6 +160,7 @@ models:
     name: "QMD Query Expansion"
     description: "Alias for QMD query expansion and OpenAI-compatible completions"
     filters:
+      stripParams: "chat_template_kwargs, thinking, thinking_budget_tokens, reasoning"
       setParams:
         reasoning: "off"
         chat_template_kwargs:
@@ -159,9 +175,9 @@ models:
       --bin ${llama_server_bin}
       --port ${PORT}
       -hf ${qmd_chat_hf_model}
-      --ctx-size ${kv_ctx_size}
-      --n-predict ${n_predict}
-      --temp ${temp}
+      --ctx-size ${qmd_chat_ctx_size}
+      --n-predict ${qmd_chat_n_predict}
+      --temp ${qmd_chat_temp}
       --top-k ${top_k}
       --top-p ${top_p}
       --min-p ${min_p}
@@ -174,16 +190,20 @@ models:
       --dry-base ${dry_base}
       --dry-allowed-length ${dry_allowed_length}
       --dry-penalty-last-n ${dry_penalty_last_n}
-      --batch-size ${batch_size}
-      --ubatch-size ${ubatch_size}
+      --batch-size ${qmd_chat_batch_size}
+      --ubatch-size ${qmd_chat_ubatch_size}
       --parallel ${parallel}
       --fit ${fit}
       --flash-attn ${flash_attn}
-      --cache-type-k ${cache_type_k}
-      --cache-type-v ${cache_type_v}
+      --cache-type-k ${qmd_chat_cache_type_k}
+      --cache-type-v ${qmd_chat_cache_type_v}
+      ${kv_unified}
+      ${cache_idle_slots}
+      ${backend_sampling}
       ${web_ui_off}
       ${no_warmup}
       ${no_mmap}
+      ${context_shift}
       --poll ${poll}
       ${jinja_on}
       --chat-template-file ${chat_template_file}
@@ -203,13 +223,14 @@ models:
       --bin ${llama_server_bin}
       --port ${PORT}
       -hf ${qmd_emb_hf_model}
-      --ctx-size ${kv_ctx_size}
-      --batch-size ${batch_size}
-      --ubatch-size ${ubatch_size}
+      --ctx-size ${qmd_emb_ctx_size}
+      --batch-size ${qmd_emb_batch_size}
+      --ubatch-size ${qmd_emb_ubatch_size}
       --parallel ${parallel}
       --flash-attn ${flash_attn}
-      --cache-type-k ${emb_cache_type_k}
-      --cache-type-v ${emb_cache_type_v}
+      --cache-type-k ${qmd_emb_cache_type_k}
+      --cache-type-v ${qmd_emb_cache_type_v}
+      ${kv_unified}
       ${no_mmap}
       --embedding
       ${no_warmup}
@@ -227,13 +248,14 @@ models:
       --bin ${llama_server_bin}
       --port ${PORT}
       -hf ${qmd_rerank_hf_model}
-      --ctx-size ${rerank_ctx_size}
-      --batch-size ${rerank_batch_size}
-      --ubatch-size ${rerank_ubatch_size}
+      --ctx-size ${qmd_rerank_ctx_size}
+      --batch-size ${qmd_rerank_batch_size}
+      --ubatch-size ${qmd_rerank_ubatch_size}
       --parallel ${parallel}
       --flash-attn ${flash_attn}
-      --cache-type-k ${emb_cache_type_k}
-      --cache-type-v ${emb_cache_type_v}
+      --cache-type-k ${qmd_rerank_cache_type_k}
+      --cache-type-v ${qmd_rerank_cache_type_v}
+      ${kv_unified}
       ${no_mmap}
       --reranking
       ${no_warmup}

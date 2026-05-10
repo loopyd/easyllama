@@ -1,9 +1,39 @@
 # Changelog
 
 Release history pulled from GitHub releases:
-https://github.com/loopyd/easyllama/releases
+[GitHub releases](https://github.com/loopyd/easyllama/releases)
 
 Format follows Keep a Changelog style where possible, based on published release notes.
+
+## [v0.3.11] - 2026-05-09
+
+Patch release focused on the config-layout cleanup, MTP warmup and tuning workflows, and lower-CPU MTP chat defaults.
+
+### Added
+
+- Added the `.github/skills/easyllama-tune/` skill with helper scripts and prompt assets for cache-quant comparisons, warmup probing, GPU-layer searches, and deterministic chat sample diffs.
+
+### Changed
+
+- Moved tracked mode templates under `config/`, updated repo defaults in `pyproject.toml`, ignored active `config/*.yml` files in `.gitignore`, and refreshed README setup and file-map guidance for the new layout.
+- Updated the shipped MTP example to the validated RTX 5090 chat profile: `131072` context, `62` GPU layers, `q8_0` KV cache, `8` generation threads, `16` batch threads, and chat polling disabled.
+
+### Fixed
+
+- Added warmup progress logging so long model loads now report elapsed time, HTTP status, and upstream state instead of appearing stalled.
+- Fixed stale `easyllama-tune` internal script references and removed the broken README mode-reference link.
+
+### Validation
+
+- Ran `./run.sh --mode mtp restart && ./run.sh --mode mtp warmup qwen3-chat`.
+- Ran authenticated short and long `POST /v1/chat/completions` probes against `qwen3-chat` after the MTP thread and polling tuning.
+- Validated `config/config.*.yml.example` with `.github/skills/easyllama-provider/scripts/validate-config-yaml.sh`.
+- Ran `bash -n .github/skills/easyllama-tune/scripts/*.sh` and `.venv/bin/python -m compileall easyllama`.
+
+### Links
+
+- Release: [v0.3.11](https://github.com/loopyd/easyllama/releases/tag/v0.3.11)
+- Compare: [v0.3.10...v0.3.11](https://github.com/loopyd/easyllama/compare/v0.3.10...v0.3.11)
 
 ## [v0.3.10] - 2026-05-05
 

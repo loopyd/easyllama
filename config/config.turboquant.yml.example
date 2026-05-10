@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/mostlygeek/llama-swap/refs/heads/main/config-schema.json
 #
 # Local runtime configuration for turboquant mode. This file is ignored by git.
-# Update values here without changing the tracked config.turboquant.yml.example
+# Update values here without changing the tracked config/config.turboquant.yml.example
 # template.
 
 healthCheckTimeout: 1800

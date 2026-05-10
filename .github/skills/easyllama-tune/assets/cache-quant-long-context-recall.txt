@@ -1,0 +1,33 @@
+You are evaluating long-context recall stability.
+
+Read the notebook below and answer only from it.
+
+Notebook:
+1. The marina inspection happened on Tuesday at 07:40.
+2. The damaged buoy was painted orange, not red.
+3. Warehouse B stored filters, solvent drums, and two spare pumps.
+4. The emergency contact on the clipboard was Dana Ibarra.
+5. The forklift battery swap took 18 minutes.
+6. The cold-room thermostat was reset to 3 C.
+7. The customs seal number was AZ-441-19.
+8. The courier who arrived late was Maren Holt.
+9. The cracked crate contained ceramic valve sleeves.
+10. The handwritten note said: "Leave Bay 4 clear for audit photos."
+11. Shift lead Elias Chen approved the overtime request.
+12. The audit photographer used a 35 mm lens.
+13. Dock 2 reopened at 14:15 after the spill cleanup.
+14. The replacement gasket shipment was tagged priority amber.
+15. The spill kit count after cleanup was 11 full kits remaining.
+
+Task:
+Return strict JSON with exactly these keys:
+{
+  "inspection_time": string,
+  "emergency_contact": string,
+  "customs_seal": string,
+  "reopened_dock": string,
+  "remaining_spill_kits": number,
+  "bay_note": string
+}
+
+Do not add any extra keys or commentary.

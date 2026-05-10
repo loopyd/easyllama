@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/mostlygeek/llama-swap/refs/heads/main/config-schema.json
 #
-# Copy this file to config.lucebox.yml for local edits and overrides.
+# Copy this file to config/config.lucebox.yml for local edits and overrides.
 # Use this mode with ./run.sh --mode lucebox start when you want Luce
 # dflash+pflash for qwen3-chat and plain llama-server for the other models.
 

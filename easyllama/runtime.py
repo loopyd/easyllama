@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -26,6 +27,7 @@ from .config import (
     mmproj_arg,
     resolved_api_key,
 )
+from .helpers import ProgressReporter
 from .logger import get_logger
 from .servers import mode_def as server_mode_def, mode_defs as server_mode_defs
 
@@ -128,6 +130,29 @@ def model_ready(settings: Settings, model_id: str, *, headers: dict[str, str]) -
     return bool(item and item.get("state") == "ready")
 
 
+def _warmup_state(item: dict[str, object] | None) -> str:
+    if not item:
+        return "waiting"
+    state = str(item.get("state") or "unknown").strip().lower()
+    return state or "unknown"
+
+
+def _update_warmup_progress(
+    reporter: ProgressReporter,
+    *,
+    started_at: float,
+    warmup_timeout: int,
+    status: int | None,
+    item: dict[str, object] | None,
+) -> None:
+    elapsed = min(int(time.monotonic() - started_at), warmup_timeout)
+    reporter.format_args["http_status"] = status if status is not None else "?"
+    reporter.format_args["state"] = _warmup_state(item)
+    delta = elapsed - int(reporter.downloaded)
+    if delta > 0:
+        reporter.update(delta)
+
+
 def warmup_models(settings: Settings, model_ids: list[str]) -> int:
     auth = load_auth(settings)
     api_key = resolved_api_key(settings, auth)
@@ -154,9 +179,29 @@ def warmup_models(settings: Settings, model_ids: list[str]) -> int:
         LOGGER.warning("No models selected for warmup")
         return 0
     failure_states = {"error", "failed", "stopped", "terminated"}
-    for model_id in selected_ids:
-        LOGGER.info("Warming model %s", model_id)
-        deadline = time.monotonic() + warmup_timeout
+    total_models = len(selected_ids)
+    for index, model_id in enumerate(selected_ids, start=1):
+        started_at = time.monotonic()
+        deadline = started_at + warmup_timeout
+        reporter = ProgressReporter(
+            model_id,
+            total=warmup_timeout,
+            log_threshold=max(1, int(warmup_poll_interval)),
+            level=logging.INFO,
+            start_template="Warming model {position}/{count}: {name}",
+            update_template=(
+                "Warming model {position}/{count}: {name} "
+                "({downloaded}/{total}s elapsed, HTTP {http_status}, state={state})"
+            ),
+            finish_template="Warmed model {position}/{count}: {name} in {downloaded}s",
+            format_args={
+                "position": index,
+                "count": total_models,
+                "http_status": "?",
+                "state": "starting",
+            },
+        )
+        reporter.start()
         last_status: int | None = None
         while time.monotonic() < deadline:
             status, detail = _http_response(
@@ -164,7 +209,14 @@ def warmup_models(settings: Settings, model_ids: list[str]) -> int:
             )
             last_status = status
             if 200 <= status < 400:
-                LOGGER.info("Warmed %s", model_id)
+                _update_warmup_progress(
+                    reporter,
+                    started_at=started_at,
+                    warmup_timeout=warmup_timeout,
+                    status=status,
+                    item={"state": "ready"},
+                )
+                reporter.finish()
                 break
             item = model_status(settings, model_id, headers=headers)
             if item and item.get("state") == "ready":
@@ -174,6 +226,14 @@ def warmup_models(settings: Settings, model_ids: list[str]) -> int:
                     status,
                     model_id,
                 )
+                _update_warmup_progress(
+                    reporter,
+                    started_at=started_at,
+                    warmup_timeout=warmup_timeout,
+                    status=status,
+                    item=item,
+                )
+                reporter.finish()
                 break
             if item:
                 state = str(item.get("state", "unknown")).lower()
@@ -189,11 +249,12 @@ def warmup_models(settings: Settings, model_ids: list[str]) -> int:
                     f"failed to warm model {model_id}: upstream health returned "
                     f"HTTP {status}: {detail}"
                 )
-            LOGGER.debug(
-                "model %s is not ready yet (HTTP %s); waiting %.1fs before retrying",
-                model_id,
-                status,
-                warmup_poll_interval,
+            _update_warmup_progress(
+                reporter,
+                started_at=started_at,
+                warmup_timeout=warmup_timeout,
+                status=status,
+                item=item,
             )
             time.sleep(warmup_poll_interval)
         else:
