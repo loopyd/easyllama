@@ -4,10 +4,12 @@ config.basic.yml
 config.turboquant.yml
 config.spiritbuun.yml
 config.lucebox.yml
+config.mtp.yml
 !config.basic.yml.example
 !config.turboquant.yml.example
 !config.spiritbuun.yml.example
 !config.lucebox.yml.example
+!config.mtp.yml.example
 
 # Environment files
 .env

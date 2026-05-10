@@ -1,8 +1,16 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/mostlygeek/llama-swap/refs/heads/main/config-schema.json
 #
-# Local runtime configuration for turboquant mode. This file is ignored by git.
-# Update values here without changing the tracked config.turboquant.yml.example
+# Local runtime configuration for MTP mode. This file is ignored by git.
+# Update values here without changing the tracked config.mtp.yml.example
 # template.
+#
+# MTP (Multi-Token Prediction) via am17an/llama.cpp mtp-clean branch.
+# Enables speculative decoding with MTP heads for 2x+ throughput on Qwen3.6 models.
+#
+# Usage:
+#   cp config.mtp.yml.example config.mtp.yml
+#   # Edit config.mtp.yml with your settings
+#   ./run.sh server basic --runtime-mode mtp -f config.mtp.yml
 
 healthCheckTimeout: 1800
 logLevel: info
@@ -12,39 +20,36 @@ globalTTL: 0
 # Shared llama-server argument macros
 macros:
   server_bin: "/opt/venv/bin/easyllama"
-  llama_server_bin: "/app/bin/llama-server-turboquant"
+  llama_server_bin: "/app/bin/llama-server-mtp"
   kv_ctx_size: "131072"
-  qwen3_chat_target_hf: "unsloth/Qwen3.6-27B-GGUF:UD-Q5_K_XL"
+  qwen3_chat_target_hf: "havenoammo/Qwen3.6-27B-MTP-UD-GGUF:Qwen3.6-27B-MTP-UD-Q6_K_XL"
   pi_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
   qmd_chat_hf_model: "tobil/qmd-query-expansion-1.7B-gguf:Q8_0"
   qmd_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
   qmd_rerank_hf_model: "mradermacher/Qwen3-Reranker-8B-GGUF:Q5_K_M"
   n_predict: "-1"
-  temp: "0.65"
+  temp: "0.7"
   top_k: "20"
-  top_p: "0.95"
+  top_p: "0.80"
   min_p: "0.0"
   sampler_seq: "edskypmxt"
-  repeat_last_n: "2048"
-  repeat_penalty: "1.01"
-  presence_penalty: "1.0"
+  repeat_last_n: "512"
+  repeat_penalty: "1.0"
+  presence_penalty: "1.5"
   frequency_penalty: "0.0"
   dry_multiplier: "0.0"
   dry_base: "1.75"
   dry_allowed_length: "2"
-  dry_penalty_last_n: "2048"
+  dry_penalty_last_n: "512"
   batch_size: "2048"
-  ubatch_size: "512"
+  ubatch_size: "1024"
   parallel: "1"
   flash_attn: "on"
   fit: "on"
-  cache_type_k: "turbo4"
-  cache_type_v: "turbo3"
+  cache_type_k: "default"
+  cache_type_v: "default"
   poll: "1"
   no_mmap: "--no-mmap"
-  kv_unified: "--kv-unified"
-  cache_idle_slots: "--cache-idle-slots"
-  backend_sampling: "--backend-sampling"
   web_ui_off: "--no-webui"
   no_warmup: "--no-warmup"
   jinja_on: "--jinja"
@@ -56,10 +61,14 @@ macros:
   rerank_ubatch_size: "2048"
   rerank_ctx_size: "4096"
 
+  # MTP-specific speculative decoding parameters
+  spec_type: "mtp"
+  spec_draft_n_max: "3"
+
 models:
   "qwen3-chat":
-    name: "Pi Qwen3 Chat 27B Turboquant"
-    description: "Primary chat/completions model with turboquant KV cache enabled"
+    name: "Pi Qwen3 Chat 27B MTP"
+    description: "Primary chat/completions model with MTP speculative decoding enabled (2x+ throughput)"
     filters:
       setParams:
         reasoning: "off"
@@ -97,9 +106,8 @@ models:
       --flash-attn ${flash_attn}
       --cache-type-k ${cache_type_k}
       --cache-type-v ${cache_type_v}
-      ${kv_unified}
-      ${cache_idle_slots}
-      ${backend_sampling}
+      --spec-type ${spec_type}
+      --spec-draft-n-max ${spec_draft_n_max}
       ${web_ui_off}
       ${no_mmap}
       --poll ${poll}
@@ -126,7 +134,6 @@ models:
       --flash-attn ${flash_attn}
       --cache-type-k ${emb_cache_type_k}
       --cache-type-v ${emb_cache_type_v}
-      ${kv_unified}
       ${no_mmap}
       --embedding
       ${no_warmup}
@@ -174,9 +181,6 @@ models:
       --flash-attn ${flash_attn}
       --cache-type-k ${cache_type_k}
       --cache-type-v ${cache_type_v}
-      ${kv_unified}
-      ${cache_idle_slots}
-      ${backend_sampling}
       ${web_ui_off}
       ${no_warmup}
       ${no_mmap}
@@ -206,7 +210,6 @@ models:
       --flash-attn ${flash_attn}
       --cache-type-k ${emb_cache_type_k}
       --cache-type-v ${emb_cache_type_v}
-      ${kv_unified}
       ${no_mmap}
       --embedding
       ${no_warmup}
@@ -231,7 +234,6 @@ models:
       --flash-attn ${flash_attn}
       --cache-type-k ${emb_cache_type_k}
       --cache-type-v ${emb_cache_type_v}
-      ${kv_unified}
       ${no_mmap}
       --reranking
       ${no_warmup}

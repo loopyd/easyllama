@@ -1,33 +1,45 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from contextlib import suppress
 from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
 import re
-import subprocess
-import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
 
 from .logger import get_logger
-from .servers import mode_names as server_mode_names
+from .helpers import (
+    ProgressReporter,
+    hf_mmproj_url,
+    _fetch_content_length,
+    _download_file,
+    project_root,
+    load_pyproject,
+    known_modes,
+    normalize_mode,
+    detect_runtime_mode,
+    absolute_path,
+    detect_timezone,
+    shutil_which,
+    image_name_for_mode,
+)
 
 LOGGER = get_logger(__name__)
 RUNTIME_HOST = "host"
 RUNTIME_CONTAINER = "container"
 MODE_BASIC = "basic"
 MODE_TURBOQUANT = "turboquant"
+MODE_MTP = "mtp"
 MODE_SPIRITBUUN = "spiritbuun"
 MODE_LUCEBOX = "lucebox"
-VALID_MODES = frozenset(server_mode_names())
 MODELS_DIR_CONTAINER = "/root/.cache/huggingface/hub"
 CHAT_TEMPLATE_DIR_CONTAINER = "/chat_template"
 MMPROJ_DIR_CONTAINER = "/mmproj"
 LLAMA_SWAP_BIN = "/app/bin/llama-swap"
-HF_URL_BASE = "https://huggingface.co"
 
 
 @dataclass(frozen=True)
@@ -66,6 +78,8 @@ class Settings:
     llama_cpp_ref: str
     turboquant_llama_cpp_repo: str
     turboquant_llama_cpp_ref: str
+    mtp_llama_cpp_repo: str
+    mtp_llama_cpp_ref: str
     spiritbuun_llama_cpp_repo: str
     spiritbuun_llama_cpp_ref: str
     lucebox_hub_repo: str
@@ -77,86 +91,6 @@ class Settings:
     def with_mode(self, mode: str) -> Settings:
         return load_settings(mode_override=mode, runtime_mode_override=self.runtime_mode)
 
-
-def project_root() -> Path:
-    env_root = os.environ.get("EASYLLAMA_ROOT")
-    if env_root:
-        return Path(env_root).resolve()
-    return Path(__file__).resolve().parents[1]
-
-
-def load_pyproject(root_dir: Path) -> tuple[dict[str, object], dict[str, object]]:
-    pyproject_path = root_dir / "pyproject.toml"
-    data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
-    tool_config = data.get("tool", {}).get("easyllama", {})
-    defaults = dict(tool_config.get("defaults", {}))
-    configs = dict(tool_config.get("configs", {}))
-    return defaults, configs
-
-
-def known_modes() -> tuple[str, ...]:
-    return server_mode_names()
-
-
-def normalize_mode(value: str | None) -> str:
-    selected = (value or MODE_BASIC).strip().lower()
-    if selected not in VALID_MODES:
-        allowed = ", ".join(known_modes())
-        raise SystemExit(f"unsupported mode: {selected}; allowed: {allowed}")
-    return selected
-
-
-def detect_runtime_mode(value: str | None = None) -> str:
-    selected = value or os.environ.get("LLAMACPP_RUNTIME_MODE")
-    if not selected:
-        return RUNTIME_CONTAINER if Path("/.dockerenv").exists() else RUNTIME_HOST
-    if selected not in {RUNTIME_HOST, RUNTIME_CONTAINER}:
-        allowed = ", ".join((RUNTIME_HOST, RUNTIME_CONTAINER))
-        raise SystemExit(f"unsupported LLAMACPP_RUNTIME_MODE={selected}; allowed: {allowed}")
-    return selected
-
-
-def absolute_path(root_dir: Path, value: str) -> Path:
-    candidate = Path(value)
-    if candidate.is_absolute():
-        return candidate
-    return (root_dir / candidate).resolve()
-
-
-def detect_timezone() -> str:
-    if os.environ.get("TZ"):
-        return os.environ["TZ"]
-    timezone_path = Path("/etc/timezone")
-    if timezone_path.is_file():
-        return timezone_path.read_text(encoding="utf-8").strip()
-    timedatectl = shutil_which("timedatectl")
-    if timedatectl:
-        result = subprocess.run(
-            [timedatectl, "show", "-p", "Timezone", "--value"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    return "UTC"
-
-
-def shutil_which(executable: str) -> str | None:
-    for directory in os.environ.get("PATH", "").split(os.pathsep):
-        candidate = Path(directory) / executable
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            return str(candidate)
-    return None
-
-
-def image_name_for_mode(image_name_base: str, image_tag_base: str, mode: str) -> str:
-    explicit = os.environ.get("LLAMACPP_IMAGE_NAME")
-    base = explicit or image_name_base
-    if ":" in base:
-        repository, tag = base.rsplit(":", 1)
-        return f"{repository}:{tag}-{mode}"
-    return f"{base}:{image_tag_base}-{mode}"
 
 
 def load_settings(
@@ -219,6 +153,12 @@ def load_settings(
         turboquant_llama_cpp_ref=os.environ.get(
             "LLAMACPP_TURBOQUANT_LLAMA_CPP_REF",
             str(defaults["turboquant_llama_cpp_ref"]),
+        ),
+        mtp_llama_cpp_repo=os.environ.get(
+            "LLAMACPP_MTP_LLAMA_CPP_REPO", str(defaults["mtp_llama_cpp_repo"])
+        ),
+        mtp_llama_cpp_ref=os.environ.get(
+            "LLAMACPP_MTP_LLAMA_CPP_REF", str(defaults["mtp_llama_cpp_ref"])
         ),
         spiritbuun_llama_cpp_repo=os.environ.get(
             "LLAMACPP_SPIRITBUUN_LLAMA_CPP_REPO",
@@ -370,36 +310,7 @@ def resolved_api_key(settings: Settings, auth: ResolvedAuth) -> str | None:
     return None
 
 
-def hf_mmproj_url(spec: str) -> str:
-    parts = spec.split("/", 2)
-    if len(parts) != 3 or not all(parts):
-        raise SystemExit(f"LLAMACPP_HF_MMPROJ must be <owner>/<repo>/<file.gguf>; got: {spec}")
-    owner, repo, filename = parts
-    return f"{HF_URL_BASE}/{owner}/{repo}/blob/main/{filename}"
 
-
-def _fetch_content_length(url: str, hf_token: str | None) -> int | None:
-    request = urllib.request.Request(url, method="HEAD")
-    if hf_token:
-        request.add_header("Authorization", f"Bearer {hf_token}")
-    try:
-        with urllib.request.urlopen(request) as response:
-            length = response.headers.get("Content-Length")
-    except urllib.error.URLError:
-        return None
-    return int(length) if length and length.isdigit() else None
-
-
-def _download_file(url: str, destination: Path, hf_token: str | None) -> None:
-    request = urllib.request.Request(url)
-    if hf_token:
-        request.add_header("Authorization", f"Bearer {hf_token}")
-    with urllib.request.urlopen(request) as response, destination.open("wb") as file_handle:
-        while True:
-            chunk = response.read(1024 * 1024)
-            if not chunk:
-                break
-            file_handle.write(chunk)
 
 
 def map_mmproj(settings: Settings, auth: ResolvedAuth, source: str) -> str:
@@ -450,11 +361,9 @@ def mmproj_arg(settings: Settings, auth: ResolvedAuth) -> str:
     source = os.environ.get("LLAMACPP_MMPROJ_FILE")
     if not source and os.environ.get("LLAMACPP_HF_MMPROJ"):
         source = hf_mmproj_url(os.environ["LLAMACPP_HF_MMPROJ"])
-    if not source and settings.mmproj_dir.is_dir():
-        candidates = sorted(settings.mmproj_dir.glob("*.gguf"))
-        if len(candidates) == 1:
-            source = str(candidates[0])
-            LOGGER.info("Using lone mmproj asset at %s", source)
+    # Do not automatically select a lone mmproj asset by default.
+    # Requiring explicit `LLAMACPP_MMPROJ_FILE` or `LLAMACPP_HF_MMPROJ` avoids
+    # surprising behavior for modes (like turboquant) that do not specify one.
     if not source:
         return ""
     return f"--mmproj {map_mmproj(settings, auth, source)}"

@@ -39,6 +39,19 @@ DEFAULT_BIN = Path("/app/bin/llama-server-basic")
                 ),
             ),
         ),
+        RuntimeModeMetadata(
+            mode="mtp",
+            docker_target="runtime-mtp",
+            build_sources=(
+                BuildSource(
+                    label="mtp",
+                    repo_attr="mtp_llama_cpp_repo",
+                    ref_attr="mtp_llama_cpp_ref",
+                    repo_build_arg="MTP_LLAMA_CPP_REPO",
+                    ref_build_arg="MTP_LLAMA_CPP_REF",
+                ),
+            ),
+        ),
     ),
 )
 class BasicServer(ServerBase):
