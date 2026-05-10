@@ -5,6 +5,26 @@ Release history pulled from GitHub releases:
 
 Format follows Keep a Changelog style where possible, based on published release notes.
 
+## [v0.3.12] - 2026-05-10
+
+Patch release focused on promoting the current MTP runtime profile into the tracked template.
+
+### Changed
+
+- Synced `config/config.mtp.yml.example` to the current live MTP layout, including the active macro names, `Q5_K_XL` chat target, `--fit off`, `--gpu-layers 99`, and explicit chat thread and polling settings.
+- Kept the tracked MTP example aligned with the currently running local configuration so fresh checkouts can reproduce the same server arguments without hand-copying local edits.
+
+### Validation
+
+- Validated `config/config.mtp.yml.example` with `.github/skills/easyllama-provider/scripts/validate-config-yaml.sh`.
+- Ran `./run.sh --mode mtp restart && ./run.sh --mode mtp warmup qwen3-chat` against the active MTP config before release.
+- Ran `.venv/bin/python -m compileall easyllama` after the version bump.
+
+### Links
+
+- Release: [v0.3.12](https://github.com/loopyd/easyllama/releases/tag/v0.3.12)
+- Compare: [v0.3.11...v0.3.12](https://github.com/loopyd/easyllama/compare/v0.3.11...v0.3.12)
+
 ## [v0.3.11] - 2026-05-09
 
 Patch release focused on the config-layout cleanup, MTP warmup and tuning workflows, and lower-CPU MTP chat defaults.

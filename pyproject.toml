@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "easyllama"
-version = "0.3.11"
+version = "0.3.12"
 description = "Mode-aware local llama.cpp runner with llama-swap, turboquant, MTP, Spiritbuun, and Luce support"
 requires-python = ">=3.11"
 dynamic = ["dependencies"]
