@@ -267,33 +267,21 @@ ENV LD_LIBRARY_PATH=/opt/llama.cpp-spiritbuun/bin:/usr/local/cuda/lib64
 
 FROM builder-base AS mtp-builder
 ARG BUILD_MODE=basic
-ARG MTP_LLAMA_CPP_REPO=https://github.com/am17an/llama.cpp.git
-ARG MTP_LLAMA_CPP_REF=mtp-clean
+ARG MTP_LLAMA_CPP_REPO=https://github.com/ggml-org/llama.cpp.git
+ARG MTP_LLAMA_CPP_REF=main
 ARG CMAKE_CUDA_ARCHITECTURES=120
 RUN --mount=type=cache,id=llamacpp-ccache,target=/root/.cache/ccache,sharing=locked \
     if [ "${BUILD_MODE}" = "mtp" ]; then \
         git clone --depth 1 --branch "${MTP_LLAMA_CPP_REF}" "${MTP_LLAMA_CPP_REPO}" /src/llama.cpp-mtp \
         && cd /src/llama.cpp-mtp \
-        && mkdir -p build/bin gguf-py models/templates \
-        && : > convert_hf_to_gguf.py; \
-        cmake -B build \
-        -DCMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES}" \
-        -DGGML_CCACHE=ON \
-        -DGGML_AVX=ON \
-        -DGGML_AVX2=ON \
-        -DGGML_F16C=ON \
-        -DGGML_AVX512=OFF \
-        -DGGML_FMA=ON \
-        -DGGML_LTO=ON \
-        -DGGML_CUDA_FORCE_MMQ=OFF \
+        && cmake -B build \
         -DGGML_CUDA=ON \
-        -DGGML_CUDA_USE_TURING_OPFMA=ON \
-        -DGGML_CUDA_PEER=OFF \
-        -DGGML_CUDA_NO_VULKAN_SHM=ON \
-        -DGGML_RPC=OFF \
-        -DLLAMA_CURL=OFF \
-        -DBUILD_SHARED_LIBS=OFF \
-        -DLLAVA_SERVER_ENABLE=ON \
+        -DCMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES}" \
+        -DGGML_NATIVE=OFF \
+        -DLLAMA_BUILD_SERVER=ON \
+        -DLLAMA_OPENSSL=ON \
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
         -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath-link,${CUDA_STUBS}" \
         -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-rpath-link,${CUDA_STUBS}" \
         -DCMAKE_BUILD_TYPE=Release \
@@ -312,6 +300,7 @@ COPY --from=mtp-builder /src/llama.cpp-mtp/models/templates/ /opt/llama.cpp/mode
 RUN mkdir -p /app/bin \
     && ln -sf /opt/llama.cpp-mtp/bin/llama-server /app/bin/llama-server-mtp
 ENV LD_LIBRARY_PATH=/opt/llama.cpp-mtp/bin:/usr/local/cuda/lib64
+# Note: upstream llama.cpp main renamed --spec-type mtp to --spec-type draft-mtp (2026-05-13)
 
 FROM builder-base AS lucebox-builder
 ARG BUILD_MODE=basic

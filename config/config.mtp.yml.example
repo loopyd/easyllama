@@ -2,7 +2,8 @@
 #
 # Local runtime configuration template for MTP mode.
 # Copy this file to config/config.mtp.yml for local edits and overrides.
-# Multi-Token Prediction via am17an/llama.cpp mtp-clean branch.
+# Multi-Token Prediction via ggml-org/llama.cpp main (PR #22673 merged 2026-05-16).
+# Uses --spec-type draft-mtp (renamed from 'mtp' on 2026-05-13).
 
 healthCheckTimeout: 1800
 logLevel: info
@@ -17,7 +18,7 @@ macros:
   llama_server_bin: "/app/bin/llama-server-mtp"
   chat_ctx_size: "131072"
   qmd_ctx_size: "131072"
-  qwen3_chat_target_hf: "havenoammo/Qwen3.6-27B-MTP-UD-GGUF:Qwen3.6-27B-MTP-UD-Q5_K_XL.gguf"
+  qwen3_chat_target_hf: "unsloth/Qwen3.6-27B-MTP-GGUF:Qwen3.6-27B-UD-Q4_K_XL.gguf"
   pi_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
   qmd_chat_hf_model: "tobil/qmd-query-expansion-1.7B-gguf:Q8_0"
   qmd_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
@@ -56,7 +57,7 @@ macros:
   rerank_batch_size: "2048"
   rerank_ubatch_size: "2048"
   rerank_ctx_size: "4096"
-  spec_type: "mtp"
+  spec_type: "draft-mtp"
   spec_draft_n_max: "3"
 
 models:
