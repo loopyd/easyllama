@@ -9,6 +9,7 @@ import shutil
 import signal
 import subprocess
 import time
+import types
 import urllib.error
 import urllib.request
 
@@ -42,7 +43,7 @@ def _build_summary(settings: Settings, target: str) -> str:
     )
 
 
-def _stop_proc(proc: subprocess.Popen[str]) -> None:
+def _stop_proc(proc: subprocess.Popen) -> None:
     if proc.poll() is not None:
         return
     try:
@@ -569,7 +570,7 @@ def serve(settings: Settings) -> int:
     )
     saved: dict[signal.Signals, object] = {}
 
-    def handle(signum: int, _frame: object) -> None:
+    def handle(signum: int, _frame: types.FrameType | None) -> None:
         LOGGER.info("received signal %s, stopping llama-swap", signum)
         _stop_proc(proc)
 
@@ -581,5 +582,5 @@ def serve(settings: Settings) -> int:
         return proc.wait()
     finally:
         for sig, handler in saved.items():
-            signal.signal(sig, handler)
+            signal.signal(sig, handler)  # pyright: ignore[reportArgumentType]
         _stop_proc(proc)

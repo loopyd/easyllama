@@ -5,6 +5,36 @@ Release history pulled from GitHub releases:
 
 Format follows Keep a Changelog style where possible, based on published release notes.
 
+## [v0.3.13] - 2026-07-03
+
+Refactoring release: unified repo source env vars, llama-swap concurrency limits, and CUDA unified memory for larger models.
+
+### Changed
+
+- **Unified repo source env vars**: Removed mode-specific `turboquant_llama_cpp_repo`, `turboquant_llama_cpp_ref`, `spiritbuun_llama_cpp_repo`, `spiritbuun_llama_cpp_ref`, `mtp_llama_cpp_repo`, and `mtp_llama_cpp_ref` from `pyproject.toml`, `Settings` dataclass, env var resolution, and Dockerfile build args. All llama.cpp variants now share one `LLAMA_CPP_REPO`/`LLAMA_CPP_REF` pair set via `LLAMACPP_LLAMA_CPP_REPO`/`LLAMACPP_LLAMA_CPP_REF` env vars or `pyproject.toml` defaults.
+- **llama-swap concurrency limits**: Added `concurrencyLimit: 4` to every model in all five runtime configs (`basic`, `turboquant`, `mtp`, `spiritbuun`, `lucebox`). llama-swap now enforces at most 4 parallel requests per upstream model via its semaphore-based throttling.
+- **CUDA unified memory**: Set `ENV GGML_CUDA_ENABLE_UNIFIED_MEMORY=1` in the Dockerfile runtime stage, allowing oversubscribed VRAM for larger models on RTX 5090 GPUs.
+
+### Fixed
+
+- Fixed ruff I001 (unsorted imports) in `config.py`, `helpers.py`, and `runtime.py`.
+- Fixed ruff F401 (unused imports) in `config.py` (`ProgressReporter`, `shutil_which`).
+- Fixed ruff F811 (duplicate `dataclass` import) in `config.py`.
+- Fixed pyright `str | object` → `int()` type errors in `config.py` `load_settings`.
+- Fixed pyright `Popen[bytes]` / `Popen[str]` mismatch in `runtime.py` `_stop_proc`.
+- Fixed pyright signal handler type error in `runtime.py`.
+
+### Validation
+
+- `ruff check easyllama/` passes with zero errors.
+- `pyright easyllama/` passes for all user code; 11 pre-existing docker SDK type-stub warnings remain.
+- Ran `.venv/bin/python -m compileall easyllama` after changes.
+
+### Links
+
+- Release: [v0.3.13](https://github.com/loopyd/easyllama/releases/tag/v0.3.13)
+- Compare: [v0.3.12...v0.3.13](https://github.com/loopyd/easyllama/compare/v0.3.12...v0.3.13)
+
 ## [v0.3.12] - 2026-05-10
 
 Patch release focused on promoting the current MTP runtime profile into the tracked template.

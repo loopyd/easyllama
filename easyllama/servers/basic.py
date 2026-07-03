@@ -32,10 +32,10 @@ DEFAULT_BIN = Path("/app/bin/llama-server-basic")
             build_sources=(
                 BuildSource(
                     label="turboquant",
-                    repo_attr="turboquant_llama_cpp_repo",
-                    ref_attr="turboquant_llama_cpp_ref",
-                    repo_build_arg="TURBOQUANT_LLAMA_CPP_REPO",
-                    ref_build_arg="TURBOQUANT_LLAMA_CPP_REF",
+                    repo_attr="llama_cpp_repo",
+                    ref_attr="llama_cpp_ref",
+                    repo_build_arg="LLAMA_CPP_REPO",
+                    ref_build_arg="LLAMA_CPP_REF",
                 ),
             ),
         ),
@@ -45,10 +45,10 @@ DEFAULT_BIN = Path("/app/bin/llama-server-basic")
             build_sources=(
                 BuildSource(
                     label="mtp",
-                    repo_attr="mtp_llama_cpp_repo",
-                    ref_attr="mtp_llama_cpp_ref",
-                    repo_build_arg="MTP_LLAMA_CPP_REPO",
-                    ref_build_arg="MTP_LLAMA_CPP_REF",
+                    repo_attr="llama_cpp_repo",
+                    ref_attr="llama_cpp_ref",
+                    repo_build_arg="LLAMA_CPP_REPO",
+                    ref_build_arg="LLAMA_CPP_REF",
                 ),
             ),
         ),

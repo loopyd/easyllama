@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-from typing import Any, Dict
 import logging
-import urllib.error
-import urllib.request
-from pathlib import Path
 import os
+from pathlib import Path
 import subprocess
 import tomllib
+from typing import Any
+import urllib.error
+import urllib.request
 
 from .logger import get_logger
+from .servers import mode_names as server_mode_names
 
 LOGGER = get_logger(__name__)
 
@@ -46,7 +47,7 @@ class ProgressReporter:
         start_template: str | None = None,
         update_template: str | None = None,
         finish_template: str | None = None,
-        format_args: Dict[str, Any] | None = None,
+        format_args: dict[str, Any] | None = None,
     ) -> None:
         self.name = name
         self.total = total
@@ -122,7 +123,8 @@ def _download_file(url: str, destination: Path, hf_token: str | None) -> None:
         request.add_header("Authorization", f"Bearer {hf_token}")
     with urllib.request.urlopen(request) as response, destination.open("wb") as file_handle:
         total_header = response.getheader("Content-Length")
-        total_size: int | None = int(total_header) if total_header and total_header.isdigit() else None
+        total_size: int | None = int(total_header) \
+            if total_header and total_header.isdigit() else None
         reporter = ProgressReporter(
             destination.name,
             total_size,
@@ -163,9 +165,6 @@ def load_pyproject(root_dir: Path) -> tuple[dict[str, object], dict[str, object]
     defaults = dict(tool_config.get("defaults", {}))
     configs = dict(tool_config.get("configs", {}))
     return defaults, configs
-
-
-from .servers import mode_names as server_mode_names
 
 
 def known_modes() -> tuple[str, ...]:

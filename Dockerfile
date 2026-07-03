@@ -25,10 +25,6 @@ ARG HOST_LANG=C.UTF-8
 ARG HOST_LC_ALL=C.UTF-8
 ARG LLAMA_CPP_REPO=https://github.com/Luce-Org/llama.cpp.git
 ARG LLAMA_CPP_REF=luce-dflash
-ARG TURBOQUANT_LLAMA_CPP_REPO=https://github.com/TheTom/llama-cpp-turboquant.git
-ARG TURBOQUANT_LLAMA_CPP_REF=feature/turboquant-kv-cache
-ARG SPIRITBUUN_LLAMA_CPP_REPO=https://github.com/spiritbuun/buun-llama-cpp.git
-ARG SPIRITBUUN_LLAMA_CPP_REF=master
 ARG LUCEBOX_HUB_REPO=https://github.com/Luce-Org/lucebox-hub.git
 ARG LUCEBOX_HUB_REF=main
 # Fallback only; run.sh auto-detects host GPU compute capability and overrides this.
@@ -146,6 +142,7 @@ RUN --mount=type=cache,id=llamacpp-pip-cache,target=/root/.cache/pip,sharing=loc
 
 ENV PYTHONUNBUFFERED=1
 ENV PATH=/opt/venv/bin:${PATH}
+ENV GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
 COPY --from=ls-download /install/llama-swap /app/bin/llama-swap
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
@@ -191,12 +188,12 @@ ENV LD_LIBRARY_PATH=/opt/llama.cpp-basic/bin:/usr/local/cuda/lib64
 
 FROM builder-base AS turboquant-builder
 ARG BUILD_MODE=basic
-ARG TURBOQUANT_LLAMA_CPP_REPO=https://github.com/TheTom/llama-cpp-turboquant.git
-ARG TURBOQUANT_LLAMA_CPP_REF=feature/turboquant-kv-cache
+ARG LLAMA_CPP_REPO=https://github.com/TheTom/llama-cpp-turboquant.git
+ARG LLAMA_CPP_REF=feature/turboquant-kv-cache
 ARG CMAKE_CUDA_ARCHITECTURES=120
 RUN --mount=type=cache,id=llamacpp-ccache,target=/root/.cache/ccache,sharing=locked \
     if [ "${BUILD_MODE}" = "turboquant" ]; then \
-        git clone --depth 1 --branch "${TURBOQUANT_LLAMA_CPP_REF}" "${TURBOQUANT_LLAMA_CPP_REPO}" /src/llama.cpp-turboquant \
+        git clone --depth 1 --branch "${LLAMA_CPP_REF}" "${LLAMA_CPP_REPO}" /src/llama.cpp-turboquant \
         && cd /src/llama.cpp-turboquant \
         && cmake -B build \
         -DGGML_CUDA=ON \
@@ -229,12 +226,12 @@ ENV LD_LIBRARY_PATH=/opt/llama.cpp-turboquant/bin:/usr/local/cuda/lib64
 
 FROM builder-base AS spiritbuun-builder
 ARG BUILD_MODE=basic
-ARG SPIRITBUUN_LLAMA_CPP_REPO=https://github.com/spiritbuun/buun-llama-cpp.git
-ARG SPIRITBUUN_LLAMA_CPP_REF=master
+ARG LLAMA_CPP_REPO=https://github.com/spiritbuun/buun-llama-cpp.git
+ARG LLAMA_CPP_REF=master
 ARG CMAKE_CUDA_ARCHITECTURES=120
 RUN --mount=type=cache,id=llamacpp-ccache,target=/root/.cache/ccache,sharing=locked \
     if [ "${BUILD_MODE}" = "spiritbuun" ]; then \
-        git clone --depth 1 --branch "${SPIRITBUUN_LLAMA_CPP_REF}" "${SPIRITBUUN_LLAMA_CPP_REPO}" /src/llama.cpp-spiritbuun \
+        git clone --depth 1 --branch "${LLAMA_CPP_REF}" "${LLAMA_CPP_REPO}" /src/llama.cpp-spiritbuun \
         && cd /src/llama.cpp-spiritbuun \
         && cmake -B build \
         -DGGML_CUDA=ON \
@@ -267,12 +264,12 @@ ENV LD_LIBRARY_PATH=/opt/llama.cpp-spiritbuun/bin:/usr/local/cuda/lib64
 
 FROM builder-base AS mtp-builder
 ARG BUILD_MODE=basic
-ARG MTP_LLAMA_CPP_REPO=https://github.com/ggml-org/llama.cpp.git
-ARG MTP_LLAMA_CPP_REF=main
+ARG LLAMA_CPP_REPO=https://github.com/ggml-org/llama.cpp.git
+ARG LLAMA_CPP_REF=master
 ARG CMAKE_CUDA_ARCHITECTURES=120
 RUN --mount=type=cache,id=llamacpp-ccache,target=/root/.cache/ccache,sharing=locked \
     if [ "${BUILD_MODE}" = "mtp" ]; then \
-        git clone --depth 1 --branch "${MTP_LLAMA_CPP_REF}" "${MTP_LLAMA_CPP_REPO}" /src/llama.cpp-mtp \
+        git clone --depth 1 --branch "${LLAMA_CPP_REF}" "${LLAMA_CPP_REPO}" /src/llama.cpp-mtp \
         && cd /src/llama.cpp-mtp \
         && cmake -B build \
         -DGGML_CUDA=ON \

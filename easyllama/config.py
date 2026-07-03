@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from contextlib import suppress
 from dataclasses import dataclass
 import json
@@ -11,22 +10,20 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from .logger import get_logger
 from .helpers import (
-    ProgressReporter,
-    hf_mmproj_url,
-    _fetch_content_length,
     _download_file,
-    project_root,
-    load_pyproject,
-    known_modes,
-    normalize_mode,
-    detect_runtime_mode,
+    _fetch_content_length,
     absolute_path,
+    detect_runtime_mode,
     detect_timezone,
-    shutil_which,
+    hf_mmproj_url,
     image_name_for_mode,
+    known_modes,
+    load_pyproject,
+    normalize_mode,
+    project_root,
 )
+from .logger import get_logger
 
 LOGGER = get_logger(__name__)
 RUNTIME_HOST = "host"
@@ -76,12 +73,6 @@ class Settings:
     cmake_cuda_architectures: str
     llama_cpp_repo: str
     llama_cpp_ref: str
-    turboquant_llama_cpp_repo: str
-    turboquant_llama_cpp_ref: str
-    mtp_llama_cpp_repo: str
-    mtp_llama_cpp_ref: str
-    spiritbuun_llama_cpp_repo: str
-    spiritbuun_llama_cpp_ref: str
     lucebox_hub_repo: str
     lucebox_hub_ref: str
     host_tz: str
@@ -119,9 +110,13 @@ def load_settings(
         mode=mode,
         image_name=image_name_for_mode(image_name_base, image_tag_base, mode),
         container_name=os.environ.get("LLAMACPP_CONTAINER_NAME", str(defaults["container_name"])),
-        host_port=int(os.environ.get("LLAMACPP_HOST_PORT", defaults["host_port"])),
-        container_port=int(os.environ.get("LLAMACPP_CONTAINER_PORT", defaults["container_port"])),
-        pids_limit=int(defaults.get("pids_limit", 256)),
+        host_port=int(
+            os.environ.get("LLAMACPP_HOST_PORT", str(defaults["host_port"]))
+        ),
+        container_port=int(
+            os.environ.get("LLAMACPP_CONTAINER_PORT", str(defaults["container_port"]))
+        ),
+        pids_limit=int(str(defaults.get("pids_limit", 256))),
         models_dir=absolute_path(
             root_dir, os.environ.get("LLAMACPP_MODELS_DIR", str(defaults["models_dir"]))
         ),
@@ -146,28 +141,6 @@ def load_settings(
         cmake_cuda_architectures=os.environ.get("LLAMACPP_CMAKE_CUDA_ARCHITECTURES", "auto"),
         llama_cpp_repo=os.environ.get("LLAMACPP_LLAMA_CPP_REPO", str(defaults["llama_cpp_repo"])),
         llama_cpp_ref=os.environ.get("LLAMACPP_LLAMA_CPP_REF", str(defaults["llama_cpp_ref"])),
-        turboquant_llama_cpp_repo=os.environ.get(
-            "LLAMACPP_TURBOQUANT_LLAMA_CPP_REPO",
-            str(defaults["turboquant_llama_cpp_repo"]),
-        ),
-        turboquant_llama_cpp_ref=os.environ.get(
-            "LLAMACPP_TURBOQUANT_LLAMA_CPP_REF",
-            str(defaults["turboquant_llama_cpp_ref"]),
-        ),
-        mtp_llama_cpp_repo=os.environ.get(
-            "LLAMACPP_MTP_LLAMA_CPP_REPO", str(defaults["mtp_llama_cpp_repo"])
-        ),
-        mtp_llama_cpp_ref=os.environ.get(
-            "LLAMACPP_MTP_LLAMA_CPP_REF", str(defaults["mtp_llama_cpp_ref"])
-        ),
-        spiritbuun_llama_cpp_repo=os.environ.get(
-            "LLAMACPP_SPIRITBUUN_LLAMA_CPP_REPO",
-            str(defaults["spiritbuun_llama_cpp_repo"]),
-        ),
-        spiritbuun_llama_cpp_ref=os.environ.get(
-            "LLAMACPP_SPIRITBUUN_LLAMA_CPP_REF",
-            str(defaults["spiritbuun_llama_cpp_ref"]),
-        ),
         lucebox_hub_repo=os.environ.get(
             "LLAMACPP_LUCEBOX_HUB_REPO", str(defaults["lucebox_hub_repo"])
         ),

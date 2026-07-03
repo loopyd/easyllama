@@ -19,10 +19,10 @@ DEFAULT_BIN = Path("/app/bin/llama-server-spiritbuun")
             build_sources=(
                 BuildSource(
                     label="spiritbuun",
-                    repo_attr="spiritbuun_llama_cpp_repo",
-                    ref_attr="spiritbuun_llama_cpp_ref",
-                    repo_build_arg="SPIRITBUUN_LLAMA_CPP_REPO",
-                    ref_build_arg="SPIRITBUUN_LLAMA_CPP_REF",
+                    repo_attr="llama_cpp_repo",
+                    ref_attr="llama_cpp_ref",
+                    repo_build_arg="LLAMA_CPP_REPO",
+                    ref_build_arg="LLAMA_CPP_REF",
                 ),
             ),
         ),

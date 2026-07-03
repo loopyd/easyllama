@@ -34,6 +34,8 @@ Why reader cares:
 - One shared Hugging Face cache: `models/`
 - One shared mmproj asset directory: `mmproj/`
 - Stable model IDs exposed through `/v1/models`
+- Per-model `concurrencyLimit: 4` in llama-swap configs to cap parallel requests
+- `GGML_CUDA_ENABLE_UNIFIED_MEMORY=1` set in runtime Docker stage for oversubscribed VRAM (RTX 5090)
 - Lazy downloads by default; use warmup for predictable first-request latency
 
 ## Modes
@@ -189,6 +191,10 @@ Most-used host commands through `./run.sh`.
 | Variable | Purpose |
 | --- | --- |
 | `LLAMACPP_MODE` | Select `basic`, `turboquant`, `mtp`, `spiritbuun`, or `lucebox` |
+| `LLAMACPP_LLAMA_CPP_REPO` | Git repo URL for the llama.cpp fork used by the active mode **(unified)** |
+| `LLAMACPP_LLAMA_CPP_REF` | Git branch/tag/commit for the llama.cpp fork **(unified)** |
+| `LLAMACPP_LUCEBOX_HUB_REPO` | Git repo URL for Luce dflash hub (lucebox mode only) |
+| `LLAMACPP_LUCEBOX_HUB_REF` | Git branch/tag/commit for Luce dflash hub |
 | `LLAMACPP_LS_CONFIG_FILE` | Use explicit config file instead of mode lookup |
 | `LLAMACPP_HOST_PORT` | Change published host port |
 | `LLAMACPP_AUTH_FILE` | Use different auth JSON file |
@@ -200,6 +206,8 @@ Most-used host commands through `./run.sh`.
 
 Notes:
 
+- **Unified repo vars**: All llama.cpp variants (basic, turboquant, mtp, spiritbuun) now share one `LLAMACPP_LLAMA_CPP_REPO`/`LLAMACPP_LLAMA_CPP_REF` pair. The old mode-specific env vars (`LLAMACPP_MTP_LLAMA_CPP_REPO`, `LLAMACPP_TURBOQUANT_LLAMA_CPP_REPO`, `LLAMACPP_SPIRITBUUN_LLAMA_CPP_REPO`, etc.) are removed. Set the unified pair to override the repo defaults in `pyproject.toml`.
+- Lucebox requires two repos: the main llama.cpp fork plus `LLAMACPP_LUCEBOX_HUB_REPO`/`LLAMACPP_LUCEBOX_HUB_REF` for the dflash hub.
 - If `auth.json` contains `api_key`, `/v1/*` routes require `Authorization: Bearer <api_key>`.
 - `LLAMACPP_LS_CONFIG_FILE` overrides mode-based config selection.
 
