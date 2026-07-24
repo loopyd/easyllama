@@ -130,9 +130,10 @@ class ServerBase:
         merged = os.environ.copy()
         if env:
             merged.update(env)
-        self.proc = subprocess.Popen(cmd, env=merged, start_new_session=True)
+        self.proc = subprocess.Popen[str](cmd, env=merged, start_new_session=True)
         self._set_signals()
         try:
+            assert self.proc is not None
             return self.proc.wait()
         finally:
             self._reset_signals()

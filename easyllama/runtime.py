@@ -10,8 +10,13 @@ import signal
 import subprocess
 import time
 import types
+from typing import Any
 import urllib.error
 import urllib.request
+
+from docker import from_env
+from docker.errors import APIError, DockerException, ImageNotFound
+from docker.types import DeviceRequest
 
 from .config import (
     CHAT_TEMPLATE_DIR_CONTAINER,
@@ -89,21 +94,27 @@ def compute_cuda_architectures(settings: Settings) -> str:
     return ";".join(sorted(values, key=int))
 
 
-def _http_json(url: str, *, headers: dict[str, str] | None = None) -> dict[str, object]:
+def _http_json(
+    url: str, *, headers: dict[str, str] | None = None, timeout: float | None = None
+) -> dict[str, object]:
     request = urllib.request.Request(url, headers=headers or {})
-    with urllib.request.urlopen(request) as response:
+    with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
-def _http_response(url: str, *, headers: dict[str, str] | None = None) -> tuple[int, str]:
+def _http_response(
+    url: str, *, headers: dict[str, str] | None = None, timeout: float | None = None
+) -> tuple[int, str]:
     request = urllib.request.Request(url, headers=headers or {})
     try:
-        with urllib.request.urlopen(request) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             body = response.read().decode("utf-8", errors="replace")
             return response.status, body
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
         return exc.code, body
+    except (TimeoutError, urllib.error.URLError) as exc:
+        return 0, str(exc)
 
 
 def _http_status(url: str, *, headers: dict[str, str] | None = None) -> int:
@@ -112,9 +123,16 @@ def _http_status(url: str, *, headers: dict[str, str] | None = None) -> int:
 
 
 def model_status(
-    settings: Settings, model_id: str, *, headers: dict[str, str]
+    settings: Settings,
+    model_id: str,
+    *,
+    headers: dict[str, str],
+    timeout: float | None = None,
 ) -> dict[str, object] | None:
-    payload = _http_json(f"{listen_url(settings)}/running", headers=headers)
+    try:
+        payload = _http_json(f"{listen_url(settings)}/running", headers=headers, timeout=timeout)
+    except (TimeoutError, urllib.error.URLError):
+        return None
     running = payload.get("running", [])
     if not isinstance(running, list):
         return None
@@ -192,7 +210,7 @@ def warmup_models(settings: Settings, model_ids: list[str]) -> int:
             start_template="Warming model {position}/{count}: {name}",
             update_template=(
                 "Warming model {position}/{count}: {name} "
-                "({downloaded}/{total}s elapsed, HTTP {http_status}, state={state})"
+                "({downloaded}s elapsed, ETA <= {remaining}s, HTTP {http_status}, state={state})"
             ),
             finish_template="Warmed model {position}/{count}: {name} in {downloaded}s",
             format_args={
@@ -206,7 +224,9 @@ def warmup_models(settings: Settings, model_ids: list[str]) -> int:
         last_status: int | None = None
         while time.monotonic() < deadline:
             status, detail = _http_response(
-                f"{base_url}/upstream/{model_id}/health", headers=headers
+                f"{base_url}/upstream/{model_id}/health",
+                headers=headers,
+                timeout=warmup_poll_interval,
             )
             last_status = status
             if 200 <= status < 400:
@@ -219,7 +239,9 @@ def warmup_models(settings: Settings, model_ids: list[str]) -> int:
                 )
                 reporter.finish()
                 break
-            item = model_status(settings, model_id, headers=headers)
+            item = model_status(
+                settings, model_id, headers=headers, timeout=warmup_poll_interval
+            )
             if item and item.get("state") == "ready":
                 LOGGER.warning(
                     "warmup health request returned HTTP %s for %s, "
@@ -268,17 +290,14 @@ def warmup_models(settings: Settings, model_ids: list[str]) -> int:
 
 class DockerRuntime:
     def __init__(self, settings: Settings) -> None:
-        import docker
-
         self.settings = settings
-        self.client = docker.from_env()
-        self.api = self.client.api
-        self.docker = docker
+        self.client: Any = from_env()
+        self.api: Any = self.client.api
 
     def ensure_daemon(self) -> None:
         try:
             self.client.ping()
-        except self.docker.errors.DockerException as exc:
+        except DockerException as exc:
             raise SystemExit("docker daemon is not reachable (start docker and retry)") from exc
 
     def ensure_nvidia_runtime(self) -> None:
@@ -306,7 +325,7 @@ class DockerRuntime:
     def image_exists(self, image_name: str | None = None) -> bool:
         try:
             self.client.images.get(image_name or self.settings.image_name)
-        except self.docker.errors.ImageNotFound:
+        except ImageNotFound:
             return False
         return True
 
@@ -393,7 +412,7 @@ class DockerRuntime:
             if container.status == "running":
                 container.stop(timeout=10)
             container.remove()
-        except self.docker.errors.APIError:
+        except APIError:
             container.remove(force=True)
         LOGGER.info("removed container %s", self.settings.container_name)
 
@@ -467,7 +486,7 @@ class DockerRuntime:
             security_opt=["no-new-privileges"],
             pids_limit=self.settings.pids_limit,
             runtime="nvidia",
-            device_requests=[self.docker.types.DeviceRequest(count=-1, capabilities=[["gpu"]])],
+            device_requests=[DeviceRequest(count=-1, capabilities=[["gpu"]])],
             ports={f"{self.settings.container_port}/tcp": self.settings.host_port},
             volumes=volumes,
             environment=environment,
@@ -512,11 +531,10 @@ class DockerRuntime:
         if container is None:
             LOGGER.info("container %s is not present", self.settings.container_name)
         else:
+            image = container.image
+            image_name = image.tags[0] if image and image.tags else "<untagged>"
             LOGGER.info(
-                "container %s status=%s image=%s",
-                container.name,
-                container.status,
-                container.image.tags[0] if container.image.tags else "<untagged>",
+                "container %s status=%s image=%s", container.name, container.status, image_name
             )
         available_images = []
         for mode_metadata in server_mode_defs():
@@ -542,7 +560,7 @@ class DockerRuntime:
             try:
                 self.client.images.remove(image_name, force=True)
                 LOGGER.info("removed image %s", image_name)
-            except self.docker.errors.ImageNotFound:
+            except ImageNotFound:
                 LOGGER.warning("image %s does not exist", image_name)
         return 0
 

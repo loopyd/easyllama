@@ -52,6 +52,19 @@ DEFAULT_BIN = Path("/app/bin/llama-server-basic")
                 ),
             ),
         ),
+        RuntimeModeMetadata(
+            mode="nvfp",
+            docker_target="runtime-nvfp",
+            build_sources=(
+                BuildSource(
+                    label="nvfp",
+                    repo_attr="llama_cpp_repo",
+                    ref_attr="llama_cpp_ref",
+                    repo_build_arg="LLAMA_CPP_REPO",
+                    ref_build_arg="LLAMA_CPP_REF",
+                ),
+            ),
+        ),
     ),
 )
 class BasicServer(ServerBase):

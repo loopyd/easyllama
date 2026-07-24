@@ -4,19 +4,32 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "easyllama"
-version = "0.3.13"
+version = "0.3.14"
 description = "Mode-aware local llama.cpp runner with llama-swap, turboquant, MTP, Spiritbuun, and Luce support"
 requires-python = ">=3.11"
-dynamic = ["dependencies"]
+dependencies = [
+    "colorama",
+    "docker",
+    "fastapi",
+    "huggingface_hub",
+    "jinja2",
+    "protobuf",
+    "pycurl",
+    "sentencepiece",
+    "torch",
+    "tqdm",
+    "transformers",
+    "uvicorn",
+]
+
+[project.optional-dependencies]
+dev = ["ruff"]
 
 [project.scripts]
 easyllama = "easyllama.main:main"
 
 [tool.setuptools.packages.find]
 include = ["easyllama", "easyllama.*"]
-
-[tool.setuptools.dynamic]
-dependencies = { file = ["requirements.txt"] }
 
 [tool.easyllama.defaults]
 image_name_base = "llamacpp-local"
@@ -47,6 +60,8 @@ spiritbuun = "config/config.spiritbuun.yml"
 spiritbuun_example = "config/config.spiritbuun.yml.example"
 mtp = "config/config.mtp.yml"
 mtp_example = "config/config.mtp.yml.example"
+nvfp = "config/config.nvfp.yml"
+nvfp_example = "config/config.nvfp.yml.example"
 lucebox = "config/config.lucebox.yml"
 lucebox_example = "config/config.lucebox.yml.example"
 

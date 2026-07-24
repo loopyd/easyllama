@@ -129,15 +129,13 @@ ENV LANG=${HOST_LANG}
 ENV LC_ALL=${HOST_LC_ALL}
 
 WORKDIR /app
-COPY requirements.txt pyproject.toml /app/
-RUN --mount=type=cache,id=llamacpp-pip-cache,target=/root/.cache/pip,sharing=locked \
-    python3 -m venv /opt/venv \
-    && /opt/venv/bin/pip install --upgrade pip \
-    && /opt/venv/bin/pip install -r /app/requirements.txt
+COPY pyproject.toml /app/
 COPY easyllama/ /app/easyllama/
 COPY run.sh /app/
 RUN --mount=type=cache,id=llamacpp-pip-cache,target=/root/.cache/pip,sharing=locked \
-    /opt/venv/bin/pip install --no-deps /app \
+    python3 -m venv /opt/venv \
+    && /opt/venv/bin/pip install --upgrade pip \
+    && /opt/venv/bin/pip install /app \
     && chmod 755 /app/run.sh
 
 ENV PYTHONUNBUFFERED=1
@@ -268,7 +266,7 @@ ARG LLAMA_CPP_REPO=https://github.com/ggml-org/llama.cpp.git
 ARG LLAMA_CPP_REF=master
 ARG CMAKE_CUDA_ARCHITECTURES=120
 RUN --mount=type=cache,id=llamacpp-ccache,target=/root/.cache/ccache,sharing=locked \
-    if [ "${BUILD_MODE}" = "mtp" ]; then \
+    if [ "${BUILD_MODE}" = "mtp" ] || [ "${BUILD_MODE}" = "nvfp" ]; then \
         git clone --depth 1 --branch "${LLAMA_CPP_REF}" "${LLAMA_CPP_REPO}" /src/llama.cpp-mtp \
         && cd /src/llama.cpp-mtp \
         && cmake -B build \
@@ -298,6 +296,9 @@ RUN mkdir -p /app/bin \
     && ln -sf /opt/llama.cpp-mtp/bin/llama-server /app/bin/llama-server-mtp
 ENV LD_LIBRARY_PATH=/opt/llama.cpp-mtp/bin:/usr/local/cuda/lib64
 # Note: upstream llama.cpp main renamed --spec-type mtp to --spec-type draft-mtp (2026-05-13)
+
+FROM runtime-mtp AS runtime-nvfp
+RUN ln -sf /opt/llama.cpp-mtp/bin/llama-server /app/bin/llama-server-nvfp
 
 FROM builder-base AS lucebox-builder
 ARG BUILD_MODE=basic

@@ -50,6 +50,8 @@ These stable IDs are exposed through `/v1/models`.
 | --- | --- |
 | `basic` | `unsloth/Qwen3.6-27B-GGUF:Q4_K_M` |
 | `turboquant` | `HauhauCS/Qwen3.6-27B-Uncensored-HauhauCS-Aggressive:Q5_K_P` |
+| `mtp` | `unsloth/Qwen3.6-27B-MTP-GGUF:Qwen3.6-27B-UD-Q4_K_XL.gguf` |
+| `nvfp` | `LibertAIDAI/Qwen3.6-35B-A3B-NVFP4-GGUF:Qwen3.6-35B-A3B-NVFP4-Q4_K_M.gguf` |
 | `spiritbuun` | target `unsloth/Qwen3.6-27B-GGUF:Q5_K_M`, draft `Ardenzard/Qwen3.6-27B-DFlash-GGUF:Qwen3.6-27B-DFlash-Q5_K_M.gguf` |
 | `lucebox` | target `unsloth/Qwen3.6-27B-GGUF:Q4_K_M`, draft `KingsonHO/Qwen3.6-27B-DFlash:model.safetensors` |
 

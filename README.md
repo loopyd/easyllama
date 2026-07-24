@@ -48,9 +48,22 @@ Pick mode by backend behavior, not by install flow. Setup path stays same.
 | --- | --- | --- | --- | --- |
 | `basic` | Plain llama.cpp path | `llama-server-basic` | `unsloth/Qwen3.6-27B-GGUF:Q4_K_M` | none |
 | `turboquant` | Turboquant KV-cache experiments | `llama-server-turboquant` | `HauhauCS/Qwen3.6-27B-Uncensored-HauhauCS-Aggressive:Q5_K_P` | none |
-| `mtp` | MTP experiments (separate llama.cpp fork/config) | `llama-server-basic` (runtime mode) | `havenoammo/Qwen3.6-27B-MTP-UD-GGUF:Qwen3.6-27B-MTP-UD-Q6_K_XL.gguf` | none |
+| `mtp` | MTP experiments (separate llama.cpp fork/config) | `llama-server-mtp` | `unsloth/Qwen3.6-27B-MTP-GGUF:Qwen3.6-27B-UD-Q4_K_XL.gguf` | none |
+| `nvfp` | RTX 5090 Blackwell NVFP4 MoE chat | `llama-server-nvfp` | `LibertAIDAI/Qwen3.6-35B-A3B-NVFP4-GGUF:Qwen3.6-35B-A3B-NVFP4-Q4_K_M.gguf` | none |
 | `spiritbuun` | buun-llama-cpp DFlash experiments | `easyllama server spiritbuun` | `unsloth/Qwen3.6-27B-GGUF:Q5_K_M` + `Ardenzard/Qwen3.6-27B-DFlash-GGUF:Qwen3.6-27B-DFlash-Q5_K_M.gguf` | none |
 | `lucebox` | Luce dflash/pflash experiments | `easyllama server lucebox` | `unsloth/Qwen3.6-27B-GGUF:Q4_K_M` + `KingsonHO/Qwen3.6-27B-DFlash:model.safetensors` | `POST /v1/messages` |
+
+### RTX 5090 NVFP4 profile
+
+Use `nvfp` for the fastest single-stream Qwen3.6 MoE path on a Blackwell RTX 5090:
+
+```bash
+./run.sh --mode nvfp build
+./run.sh --mode nvfp start
+./run.sh --mode nvfp warmup qwen3-chat
+```
+
+It loads `Qwen3.6-35B-A3B-NVFP4-Q4_K_M`, fully offloads the model, enables Flash Attention, uses a 262,144-token context, and uses `q4_0` for both KV tensors. It intentionally does **not** enable MTP: current llama.cpp MTP draft/verify overhead is slower than ordinary decoding for this fast MoE. Use `mtp` instead to experiment with the separate Qwen3.6-27B MTP profile.
 
 ## System requirements
 
@@ -70,7 +83,7 @@ Minimal host setup for running `./run.sh` from checkout:
 ```bash
 python3 -m venv ./.venv
 .venv/bin/activate
-python -m pip install -r ./requirements.txt
+python -m pip install .
 ```
 
 Editable development install:
@@ -78,7 +91,7 @@ Editable development install:
 ```bash
 python3 -m venv ./.venv
 .venv/bin/activate
-python -m pip install -e . -r ./requirements.txt -r ./requirements-dev.txt
+python -m pip install -e ".[dev]"
 ```
 
 ## Quick start
@@ -103,6 +116,7 @@ cp config/config.basic.yml.example config/config.basic.yml
 cp config/config.turboquant.yml.example config/config.turboquant.yml
 cp config/config.spiritbuun.yml.example config/config.spiritbuun.yml
 cp config/config.mtp.yml.example config/config.mtp.yml
+cp config/config.nvfp.yml.example config/config.nvfp.yml
 cp config/config.lucebox.yml.example config/config.lucebox.yml
 ```
 
@@ -173,11 +187,13 @@ Most-used host commands through `./run.sh`.
 | `config/config.turboquant.yml` | Editable config for `turboquant` |
 | `config/config.spiritbuun.yml` | Editable config for `spiritbuun` |
 | `config/config.mtp.yml` | Editable config for `mtp` |
+| `config/config.nvfp.yml` | Editable config for RTX 5090 NVFP4 |
 | `config/config.lucebox.yml` | Editable config for `lucebox` |
 | `config/config.basic.yml.example` | Tracked `basic` template |
 | `config/config.turboquant.yml.example` | Tracked `turboquant` template |
 | `config/config.spiritbuun.yml.example` | Tracked `spiritbuun` template |
 | `config/config.mtp.yml.example` | Tracked `mtp` template |
+| `config/config.nvfp.yml.example` | Tracked RTX 5090 NVFP4 template |
 | `config/config.lucebox.yml.example` | Tracked `lucebox` template |
 | `models/` | Shared Hugging Face cache |
 | `mmproj/` | Shared mmproj assets |
@@ -190,7 +206,7 @@ Most-used host commands through `./run.sh`.
 
 | Variable | Purpose |
 | --- | --- |
-| `LLAMACPP_MODE` | Select `basic`, `turboquant`, `mtp`, `spiritbuun`, or `lucebox` |
+| `LLAMACPP_MODE` | Select `basic`, `turboquant`, `mtp`, `nvfp`, `spiritbuun`, or `lucebox` |
 | `LLAMACPP_LLAMA_CPP_REPO` | Git repo URL for the llama.cpp fork used by the active mode **(unified)** |
 | `LLAMACPP_LLAMA_CPP_REF` | Git branch/tag/commit for the llama.cpp fork **(unified)** |
 | `LLAMACPP_LUCEBOX_HUB_REPO` | Git repo URL for Luce dflash hub (lucebox mode only) |

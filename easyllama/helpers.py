@@ -4,10 +4,13 @@ import logging
 import os
 from pathlib import Path
 import subprocess
+import time
 import tomllib
 from typing import Any
 import urllib.error
 import urllib.request
+
+import pycurl
 
 from .logger import get_logger
 from .servers import mode_names as server_mode_names
@@ -20,33 +23,17 @@ HF_URL_BASE = "https://huggingface.co"
 
 
 class ProgressReporter:
-    """Generic progress reporter for long-running tasks.
-
-    Can be used for downloads or any process that reports incremental progress.
-
-    Parameters:
-      name: short name for the task (for logs)
-      total: optional total units (bytes/items)
-      log_threshold: how many units between update logs
-      level: logging level (int)
-      start_template: optional format string for a start message
-      update_template: format string for periodic updates
-      finish_template: format string for final message
-      format_args: extra named values available to templates
-
-    Templates support these fields by default: {name}, {downloaded}, {total}, {percent}.
-    Additional values from `format_args` are also available (for example {url}).
-    """
+    """Rate-limited log progress for non-download tasks."""
 
     def __init__(
         self,
         name: str,
         total: int | None = None,
-        log_threshold: int = 2 * 1024 * 1024,
-        level: int = logging.DEBUG,
+        log_threshold: int = 1,
+        level: int = logging.INFO,
         start_template: str | None = None,
-        update_template: str | None = None,
-        finish_template: str | None = None,
+        update_template: str = "{name}: {downloaded}/{total}",
+        finish_template: str = "Completed {name}: {downloaded}/{total}",
         format_args: dict[str, Any] | None = None,
     ) -> None:
         self.name = name
@@ -54,34 +41,22 @@ class ProgressReporter:
         self.log_threshold = log_threshold
         self.level = level
         self.start_template = start_template
-        self.update_template = (
-            update_template
-            or "Downloading {name}: {downloaded}/{total} bytes ({percent:.1f}%)"
-        )
-        self.finish_template = (
-            finish_template or "Download complete {name}: {downloaded}/{total} bytes"
-        )
+        self.update_template = update_template
+        self.finish_template = finish_template
         self.format_args = dict(format_args or {})
-
         self.downloaded = 0
         self.next_log = log_threshold
 
     def _render(self, template: str) -> str:
-        percent = 0.0
-        if self.total and self.total > 0:
-            percent = self.downloaded * 100.0 / self.total
-        values = dict(
-            name=self.name,
-            downloaded=self.downloaded,
-            total=self.total or 0,
-            percent=percent,
-        )
-        values.update(self.format_args)
-        try:
-            return template.format(**values)
-        except Exception:
-            # Fallback to a simple join if formatting fails
-            return f"{self.name} {self.downloaded}/{self.total or '?'}"
+        values = {
+            "name": self.name,
+            "downloaded": self.downloaded,
+            "total": self.total or 0,
+            "percent": self.downloaded * 100 / self.total if self.total else 0,
+            "remaining": max((self.total or 0) - self.downloaded, 0),
+            **self.format_args,
+        }
+        return template.format(**values)
 
     def start(self) -> None:
         if self.start_template:
@@ -117,38 +92,80 @@ def _fetch_content_length(url: str, hf_token: str | None) -> int | None:
     return int(length) if length and length.isdigit() else None
 
 
+def _format_bytes(value: float) -> str:
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if value < 1024 or unit == "TiB":
+            return f"{value:.0f} {unit}" if unit == "B" else f"{value:.1f} {unit}"
+        value /= 1024
+    raise AssertionError("unreachable")
+
+
+def _format_duration(seconds: float) -> str:
+    return f"{max(0, round(seconds))}s"
+
+
 def _download_file(url: str, destination: Path, hf_token: str | None) -> None:
-    request = urllib.request.Request(url)
-    if hf_token:
-        request.add_header("Authorization", f"Bearer {hf_token}")
-    with urllib.request.urlopen(request) as response, destination.open("wb") as file_handle:
-        total_header = response.getheader("Content-Length")
-        total_size: int | None = int(total_header) \
-            if total_header and total_header.isdigit() else None
-        reporter = ProgressReporter(
-            destination.name,
-            total_size,
-            format_args={"url": url},
-            start_template="Starting download {url} -> {name}",
-            update_template=(
-                "Downloading {name}: {downloaded}/{total} bytes ({percent:.1f}%)"
-                if total_size
-                else "Downloading {name}: {downloaded} bytes downloaded"
-            ),
-            finish_template=(
-                "Download complete {name}: {downloaded}/{total} bytes"
-                if total_size
-                else "Download complete {name}: {downloaded} bytes"
-            ),
-        )
-        reporter.start()
-        while True:
-            chunk = response.read(1024 * 1024)
-            if not chunk:
-                break
-            file_handle.write(chunk)
-            reporter.update(len(chunk))
-        reporter.finish()
+    """Download *url* and log byte progress, current rate, and ETA every five seconds."""
+    LOGGER.info("Starting download %s -> %s", url, destination.name)
+    started_at = last_log = time.monotonic()
+    downloaded = last_downloaded = 0
+    total_bytes = 0
+
+    with destination.open("wb") as file_handle:
+        curl = pycurl.Curl()
+        try:
+            curl.setopt(pycurl.URL, url)
+            curl.setopt(pycurl.WRITEDATA, file_handle)
+            curl.setopt(pycurl.FAILONERROR, True)
+            curl.setopt(pycurl.FOLLOWLOCATION, True)
+            if hf_token:
+                curl.setopt(pycurl.HTTPHEADER, [f"Authorization: Bearer {hf_token}"])
+
+            def report(
+                total: float, current: float, _upload_total: float, _upload_current: float
+            ) -> int:
+                nonlocal downloaded, last_downloaded, last_log, total_bytes
+                now = time.monotonic()
+                downloaded, total_bytes = int(current), int(total)
+                elapsed = now - last_log
+                if elapsed < 5:
+                    return 0
+                speed = (downloaded - last_downloaded) / elapsed
+                if total_bytes and speed > 0:
+                    eta = _format_duration((total_bytes - downloaded) / speed)
+                    LOGGER.info(
+                        "Downloading %s: %s/%s (%.1f%%, %s/s, ETA %s)",
+                        destination.name,
+                        _format_bytes(downloaded),
+                        _format_bytes(total_bytes),
+                        downloaded * 100 / total_bytes,
+                        _format_bytes(speed),
+                        eta,
+                    )
+                else:
+                    LOGGER.info(
+                        "Downloading %s: %s (%s/s, ETA unknown)",
+                        destination.name,
+                        _format_bytes(downloaded),
+                        _format_bytes(speed),
+                    )
+                last_downloaded, last_log = downloaded, now
+                return 0
+
+            curl.setopt(pycurl.XFERINFOFUNCTION, report)
+            curl.setopt(pycurl.NOPROGRESS, False)
+            curl.perform()
+        finally:
+            curl.close()
+    elapsed = time.monotonic() - started_at
+    speed = downloaded / elapsed if elapsed else 0
+    LOGGER.info(
+        "Download complete %s: %s in %s (%s/s)",
+        destination.name,
+        _format_bytes(downloaded),
+        _format_duration(elapsed),
+        _format_bytes(speed),
+    )
 
 
 def project_root() -> Path:

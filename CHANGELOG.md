@@ -5,6 +5,43 @@ Release history pulled from GitHub releases:
 
 Format follows Keep a Changelog style where possible, based on published release notes.
 
+## [v0.3.14] - 2026-07-24
+
+Feature release: new `nvfp` mode for RTX 5090 Blackwell NVFP4 MoE inference, pycurl-based download progress with rate/ETA, and dependency migration to pyproject.toml.
+
+### Added
+
+- **NVFP mode**: New `--mode nvfp` for RTX 5090 Blackwell NVFP4 MoE chat. Builds a `runtime-nvfp` Docker target that symlinks the MTP llama-server binary, loads `Qwen3.6-35B-A3B-NVFP4-Q4_K_M` with 262,144-token context and Flash Attention enabled. See README for setup.
+- **Download progress with rate & ETA**: Replaced `urllib` download with `pycurl` in `_download_file()`. Downloads now log byte progress, current transfer speed, and ETA every five seconds during downloads.
+- **Warmup timeout on health checks**: Added `timeout` parameter to `_http_json`, `_http_response`, and `model_status`; warmup polling now times out per-request instead of hanging indefinitely.
+- **Elapsed time display in warmup**: Warmup reporter now shows `{downloaded}s elapsed, ETA <= {remaining}s` in its update template for clearer progress feedback.
+- **`subprocess.Popen[str]` type annotation** in `ServerBase._run_foreground` for stricter typing.
+
+### Changed
+
+- **Dependencies moved to pyproject.toml**: Removed `requirements.txt` and `requirements-dev.txt`. All runtime dependencies (`colorama`, `docker`, `fastapi`, `huggingface_hub`, `jinja2`, `protobuf`, `pycurl`, `sentencepiece`, `torch`, `tqdm`, `transformers`, `uvicorn`) are now declared inline under `[project.dependencies]`. Dev dependencies use `[project.optional-dependencies] dev = ["ruff"]`.
+- **Install commands updated in README**: Minimal install now uses `pip install .`; editable dev install uses `pip install -e ".[dev]"`.
+- **Dockerfile build stage**: Runtime stage now creates venv and installs via `pip install /app` from pyproject.toml instead of `--no-deps` from requirements.txt.
+- **Docker imports in runtime.py**: Replaced lazy `import docker` with explicit top-level imports from `docker`, `docker.errors`, and `docker.types` for better type safety.
+- **API.md**: Added `nvfp` and updated `mtp` model references.
+
+### Fixed
+
+- Fixed `TimeoutError` / `URLError` not being caught in `_http_response()`, which could cause warmup hangs when the server is unresponsive.
+- Fixed `self.docker.errors.*` attribute access that would break if `docker` wasn't imported at module level.
+- Fixed `Popen[bytes]`/`Popen[str]` type mismatch in `runtime.py` `_stop_proc` (already fixed in prior release; reaffirmed).
+
+### Validation
+
+- `ruff check easyllama/` passes with zero errors.
+- `pyright easyllama/` passes for all user code.
+- Ran `.venv/bin/python -m compileall easyllama` after changes.
+
+### Links
+
+- Release: [v0.3.14](https://github.com/loopyd/easyllama/releases/tag/v0.3.14)
+- Compare: [v0.3.13...v0.3.14](https://github.com/loopyd/easyllama/compare/v0.3.13...v0.3.14)
+
 ## [v0.3.13] - 2026-07-03
 
 Refactoring release: unified repo source env vars, llama-swap concurrency limits, and CUDA unified memory for larger models.
