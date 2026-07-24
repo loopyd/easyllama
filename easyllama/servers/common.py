@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from functools import partial
+import logging
 import os
 from pathlib import Path
 import subprocess
 import sys
 import time
 from typing import Any
+import warnings
 
 from ..logger import get_logger
 
@@ -64,6 +69,24 @@ def token() -> str | None:
     return None
 
 
+@contextmanager
+def _quiet_hf() -> Iterator[None]:
+    loggers = tuple(
+        logging.getLogger(name)
+        for name in ("httpx", "huggingface_hub", "huggingface_hub.utils._http")
+    )
+    levels = tuple(logger.level for logger in loggers)
+    try:
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning, module="huggingface_hub")
+            for logger in loggers:
+                logger.setLevel(logging.WARNING)
+            yield
+    finally:
+        for logger, level in zip(loggers, levels, strict=True):
+            logger.setLevel(level)
+
+
 def hf_spec(spec: str | None, *, default: str | None = None) -> tuple[str | None, str | None]:
     if not spec:
         return None, default
@@ -117,7 +140,8 @@ def hf_file(
     from huggingface_hub import HfApi
 
     try:
-        files = HfApi(token=token()).list_repo_files(repo_id=repo, repo_type="model")
+        with _quiet_hf():
+            files = HfApi(token=token()).list_repo_files(repo_id=repo, repo_type="model")
     except Exception as exc:  # pragma: no cover
         raise SystemExit(f"failed to inspect {label} files in {repo}: {exc}") from exc
 
@@ -161,14 +185,19 @@ def hf_file(
 
 
 class _HFProgress:
-    """Tqdm-compatible progress reporter for Hugging Face downloads."""
+    """Tqdm-compatible, rate-limited progress reporter for Hugging Face downloads."""
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, warmup: str | None = None, **kwargs: Any) -> None:
         self.total = int(kwargs.get("total") or 0)
         self.n = int(kwargs.get("initial") or 0)
         self.desc = str(kwargs.get("desc") or "Downloading model")
+        self.warmup = warmup
         self._started = self._last_log = time.monotonic()
         self._last_n = self.n
+
+    @property
+    def _label(self) -> str:
+        return f"{self.warmup} — {self.desc}" if self.warmup else self.desc
 
     def __enter__(self) -> _HFProgress:
         return self
@@ -182,11 +211,14 @@ class _HFProgress:
         elapsed = now - self._last_log
         if elapsed < 5:
             return
-        rate = (self.n - self._last_n) / elapsed
-        if self.total and rate > 0:
+        transferred = self.n - self._last_n
+        if transferred <= 0:
+            return
+        rate = transferred / elapsed
+        if self.total:
             LOG.info(
                 "%s: %s/%s (%.1f%%, %s/s, ETA %s)",
-                self.desc,
+                self._label,
                 _format_bytes(self.n),
                 _format_bytes(self.total),
                 self.n * 100 / self.total,
@@ -196,25 +228,26 @@ class _HFProgress:
         else:
             LOG.info(
                 "%s: %s (%s/s, ETA unknown)",
-                self.desc,
+                self._label,
                 _format_bytes(self.n),
                 _format_bytes(rate),
             )
         self._last_log, self._last_n = now, self.n
 
     def close(self) -> None:
-        elapsed = time.monotonic() - self._started
-        if self.n:
-            LOG.info(
-                "%s complete: %s in %s",
-                self.desc,
-                _format_bytes(self.n),
-                _format_duration(elapsed),
-            )
+        pass
 
 
-def hf_get(repo: str, file: str, label: str, *, cache_dir: Path | None = None) -> Path:
+def hf_get(
+    repo: str,
+    file: str,
+    label: str,
+    *,
+    cache_dir: Path | None = None,
+    warmup: str | None = None,
+) -> Path:
     from huggingface_hub import hf_hub_download
+    from huggingface_hub.errors import LocalEntryNotFoundError
 
     try:
         options: dict[str, Any] = {
@@ -222,9 +255,13 @@ def hf_get(repo: str, file: str, label: str, *, cache_dir: Path | None = None) -
             "filename": file,
             "token": token(),
             "cache_dir": cache_dir,
-            "tqdm_class": _HFProgress,
+            "tqdm_class": partial(_HFProgress, warmup=warmup),
         }
-        path = hf_hub_download(**options)
+        try:
+            path = hf_hub_download(**options, local_files_only=True)
+        except LocalEntryNotFoundError:
+            with _quiet_hf():
+                path = hf_hub_download(**options)
     except Exception as exc:  # pragma: no cover
         raise SystemExit(f"failed to download {label} from {repo}/{file}: {exc}") from exc
     return Path(path)

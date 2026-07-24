@@ -8,17 +8,15 @@
 healthCheckTimeout: 1800
 logLevel: info
 sendLoadingState: false
-# Keep explicitly warmed workers alive.  `matrix` permits the resident set below;
-# it does not preload it—run `./run.sh --mode nvfp warmup` after starting/restarting.
+# Keep chat and embeddings resident; query expansion and reranking swap in alone.
+# `matrix` does not preload workers—run `./run.sh --mode nvfp warmup` after start/restart.
 globalTTL: 0
 matrix:
   vars:
     chat: qwen3-chat
     emb: qwen3-embeddings
-    gen: qmd-generate
-    rank: qmd-rerank
   sets:
-    resident: "chat & emb & gen & rank"
+    resident: "chat & emb"
 
 macros:
   server_bin: "/opt/venv/bin/easyllama"

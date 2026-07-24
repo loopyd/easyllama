@@ -5,6 +5,34 @@ Release history pulled from GitHub releases:
 
 Format follows Keep a Changelog style where possible, based on published release notes.
 
+## [v0.3.16] - 2026-07-24
+
+Patch release for deterministic, custom NVFP warmup output.
+
+### Changed
+
+- **Unified warmup progress**: Hugging Face transfers now use the same `Warming model #/#` prefix as worker loading, retaining downloaded size, total size, percentage, transfer speed, and ETA while a model is fetched.
+- **Clean cached-model status**: Cache hits report `cached`, elapsed time, and llama-swap state without fabricating download telemetry.
+- **Quiet default CLI output**: Default logging is `INFO`; warmup suppresses Hugging Face HTTP/advisory chatter and duplicate completion records.
+
+### Fixed
+
+- Removed duplicate progress close messages (`complete`/`close.*`) from warmup output.
+- Keep the upstream warmup trigger open in the background so its cancellation cannot kill a model that is still loading.
+
+### Validation
+
+- `python test_download_progress.py`
+- `python test_warmup_progress.py`
+- `ruff check easyllama/servers/common.py easyllama/runtime.py easyllama/logger.py test_warmup_progress.py`
+- `python -m compileall -q easyllama`
+- Clean NVFP Docker rebuild and `./run.sh --mode nvfp warmup --` (all four models warmed successfully with only custom `INFO` output).
+
+### Links
+
+- Release: [v0.3.16](https://github.com/loopyd/easyllama/releases/tag/v0.3.16)
+- Compare: [v0.3.15...v0.3.16](https://github.com/loopyd/easyllama/compare/v0.3.15...v0.3.16)
+
 ## [v0.3.15] - 2026-07-24
 
 Patch release focused on keeping the complete NVFP retrieval worker set resident after warmup and accurately reporting model-download versus server-load progress.

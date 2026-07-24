@@ -8,6 +8,7 @@ import re
 import shutil
 import signal
 import subprocess
+import threading
 import time
 import types
 from typing import Any
@@ -153,7 +154,7 @@ def model_ready(settings: Settings, model_id: str, *, headers: dict[str, str]) -
 
 def _warmup_state(item: dict[str, object] | None) -> str:
     if not item:
-        return "waiting"
+        return "loading"
     state = str(item.get("state") or "unknown").strip().lower()
     return state or "unknown"
 
@@ -175,6 +176,25 @@ def _update_warmup_progress(
         reporter.update(delta)
 
 
+def _trigger_warmup(
+    base_url: str,
+    model_id: str,
+    *,
+    headers: dict[str, str],
+    timeout: int,
+) -> list[int | None]:
+    """Start the upstream request without cancelling the model while it loads."""
+    status: list[int | None] = [None]
+
+    def request() -> None:
+        status[0], _ = _http_response(
+            f"{base_url}/upstream/{model_id}/health", headers=headers, timeout=timeout
+        )
+
+    threading.Thread(target=request, daemon=True).start()
+    return status
+
+
 def _prefetch_models(settings: Settings, model_ids: list[str]) -> None:
     """Download warmup GGUFs on the host so easyllama owns byte progress."""
     import yaml
@@ -182,15 +202,16 @@ def _prefetch_models(settings: Settings, model_ids: list[str]) -> None:
     config = yaml.safe_load(resolve_ls_config(settings).read_text(encoding="utf-8")) or {}
     macros = config.get("macros", {})
     models = config.get("models", {})
-    for model_id in model_ids:
+    total_models = len(model_ids)
+    for position, model_id in enumerate(model_ids, start=1):
         command = str(models.get(model_id, {}).get("cmd", ""))
-        match = re.search(r"(?:^|\\s)-hf\\s+(\\S+)", command)
+        match = re.search(r"(?:^|\s)-hf\s+(\S+)", command)
         if not match:
             continue
         spec = match.group(1)
         for _ in range(len(macros)):
             expanded = re.sub(
-                r"\\$\\{([A-Za-z0-9_-]+)\\}",
+                r"\$\{([A-Za-z0-9_-]+)\}",
                 lambda item: str(macros.get(item.group(1), item.group(0))),
                 spec,
             )
@@ -199,12 +220,12 @@ def _prefetch_models(settings: Settings, model_ids: list[str]) -> None:
             spec = expanded
         repo, selector = hf_spec(spec)
         if repo and selector:
-            LOGGER.info("Preparing %s locally before starting %s", repo, model_id)
             hf_get(
                 repo,
                 hf_file(repo, selector, model_id, suffixes=(".gguf",)),
                 model_id,
                 cache_dir=settings.models_dir,
+                warmup=f"Warming model {position}/{total_models}: {model_id}",
             )
 
 
@@ -247,26 +268,22 @@ def warmup_models(settings: Settings, model_ids: list[str]) -> int:
             start_template="Warming model {position}/{count}: {name}",
             update_template=(
                 "Warming model {position}/{count}: {name} "
-                "({elapsed}s elapsed, state={state}, initial HTTP {http_status}; "
-                "download rate/ETA unavailable from llama-swap)"
+                "— cached; {elapsed}s elapsed, state={state}"
             ),
             finish_template="Warmed model {position}/{count}: {name} in {downloaded}s",
             format_args={
                 "position": index,
                 "count": total_models,
                 "http_status": "?",
-                "state": "starting",
+                "state": "loading",
                 "elapsed": 0,
             },
         )
         reporter.start()
-        # One upstream health request starts the worker.  Polling it while the
-        # worker is downloading/loading can produce 429 responses and cannot
-        # provide download progress; `/running` is the authoritative state.
-        last_status, _ = _http_response(
-            f"{base_url}/upstream/{model_id}/health",
-            headers=headers,
-            timeout=warmup_poll_interval,
+        # Keep the one trigger request open: cancelling it also cancels a
+        # still-loading llama-swap worker. `/running` is the authoritative state.
+        trigger_status = _trigger_warmup(
+            base_url, model_id, headers=headers, timeout=warmup_timeout
         )
         while time.monotonic() < deadline:
             item = model_status(
@@ -277,7 +294,7 @@ def warmup_models(settings: Settings, model_ids: list[str]) -> int:
                     reporter,
                     started_at=started_at,
                     warmup_timeout=warmup_timeout,
-                    status=last_status,
+                    status=trigger_status[0],
                     item=item,
                 )
                 reporter.finish()
@@ -294,14 +311,14 @@ def warmup_models(settings: Settings, model_ids: list[str]) -> int:
                 reporter,
                 started_at=started_at,
                 warmup_timeout=warmup_timeout,
-                status=last_status,
+                status=trigger_status[0],
                 item=item,
             )
             time.sleep(warmup_poll_interval)
         else:
             raise SystemExit(
                 f"failed to warm model {model_id} within {warmup_timeout}s "
-                f"(last HTTP {last_status})"
+                f"(last HTTP {trigger_status[0]})"
             )
     return 0
 

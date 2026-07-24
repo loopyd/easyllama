@@ -21,7 +21,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only before deps are
         return None
 
 
-DEFAULT_LEVEL = "DEBUG"
+DEFAULT_LEVEL = "INFO"
 LEVEL_NAMES = {
     "critical": logging.CRITICAL,
     "error": logging.ERROR,
