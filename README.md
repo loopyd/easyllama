@@ -141,6 +141,11 @@ Pass model IDs to warm only subset:
 
 With no model arguments, warmup hits every model exposed by `/v1/models`.
 
+`nvfp` configures llama-swap's matrix to allow chat, embeddings, query expansion, and
+reranking workers to remain resident; `qmd-embed` is an alias of the embedding worker,
+not a duplicate 8B process. After every start or restart, run the no-argument warmup once;
+`globalTTL: 0` then prevents idle eviction. This needs enough VRAM for the complete set.
+
 ### 4. Verify runtime
 
 ```bash

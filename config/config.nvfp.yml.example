@@ -8,7 +8,17 @@
 healthCheckTimeout: 1800
 logLevel: info
 sendLoadingState: false
+# Keep explicitly warmed workers alive.  `matrix` permits the resident set below;
+# it does not preload it—run `./run.sh --mode nvfp warmup` after starting/restarting.
 globalTTL: 0
+matrix:
+  vars:
+    chat: qwen3-chat
+    emb: qwen3-embeddings
+    gen: qmd-generate
+    rank: qmd-rerank
+  sets:
+    resident: "chat & emb & gen & rank"
 
 macros:
   server_bin: "/opt/venv/bin/easyllama"
@@ -19,10 +29,10 @@ macros:
   chat_ctx_size: "262144"
   qmd_ctx_size: "131072"
   qwen3_chat_target_hf: "LibertAIDAI/Qwen3.6-35B-A3B-NVFP4-GGUF:Qwen3.6-35B-A3B-NVFP4-Q4_K_M.gguf"
-  pi_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
+  pi_emb_hf_model: "Qwen/Qwen3-Embedding-4B-GGUF:Q4_K_M"
   qmd_chat_hf_model: "tobil/qmd-query-expansion-1.7B-gguf:Q8_0"
-  qmd_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
-  qmd_rerank_hf_model: "mradermacher/Qwen3-Reranker-8B-GGUF:Q5_K_M"
+  qmd_emb_hf_model: "Qwen/Qwen3-Embedding-4B-GGUF:Q4_K_M"
+  qmd_rerank_hf_model: "Voodisss/Qwen3-Reranker-4B-GGUF-llama_cpp:Qwen3-Reranker-4B-Q4_K_M.gguf"
   n_predict: "-1"
   temp: "0.7"
   top_k: "20"
@@ -103,8 +113,10 @@ models:
       - "HF_TOKEN=${env.HF_TOKEN}"
 
   "qwen3-embeddings":
-    name: "Pi Qwen3 Embeddings 8B"
-    description: "Dense embedding model for vector search, RAG, similarity"
+    name: "Pi Qwen3 Embeddings 4B"
+    description: "Qwen3 4B dense embeddings: the NVFP balanced speed/quality profile; rebuild existing 8B vector indexes before use"
+    aliases:
+      - "qmd-embed"
     cmd: |
       ${server_bin}
       server
@@ -176,32 +188,9 @@ models:
     env:
       - "HF_TOKEN=${env.HF_TOKEN}"
 
-  "qmd-embed":
-    name: "QMD Embedding"
-    description: "Alias for QMD /v1/embeddings requests"
-    cmd: |
-      ${server_bin}
-      server
-      basic
-      --bin ${llama_server_bin}
-      --port ${PORT}
-      -hf ${qmd_emb_hf_model}
-      --ctx-size ${qmd_ctx_size}
-      --batch-size ${batch_size}
-      --ubatch-size ${ubatch_size}
-      --parallel ${parallel}
-      --flash-attn ${flash_attn}
-      --cache-type-k ${emb_cache_type_k}
-      --cache-type-v ${emb_cache_type_v}
-      ${no_mmap}
-      --embedding
-      ${no_warmup}
-    env:
-      - "HF_TOKEN=${env.HF_TOKEN}"
-
   "qmd-rerank":
-    name: "Qwen3 Reranker 8B"
-    description: "Cross-encoder reranking model for QMD /v1/rerank requests"
+    name: "Qwen3 Reranker 4B"
+    description: "Qwen3 4B cross-encoder reranking: NVFP balanced speed/quality profile"
     cmd: |
       ${server_bin}
       server

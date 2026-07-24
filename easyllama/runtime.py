@@ -31,11 +31,13 @@ from .config import (
     listen_url,
     load_auth,
     mmproj_arg,
+    resolve_ls_config,
     resolved_api_key,
 )
 from .helpers import ProgressReporter
 from .logger import get_logger
 from .servers import mode_def as server_mode_def, mode_defs as server_mode_defs
+from .servers.common import hf_file, hf_get, hf_spec
 
 LOGGER = get_logger(__name__)
 
@@ -167,9 +169,43 @@ def _update_warmup_progress(
     elapsed = min(int(time.monotonic() - started_at), warmup_timeout)
     reporter.format_args["http_status"] = status if status is not None else "?"
     reporter.format_args["state"] = _warmup_state(item)
+    reporter.format_args["elapsed"] = elapsed
     delta = elapsed - int(reporter.downloaded)
     if delta > 0:
         reporter.update(delta)
+
+
+def _prefetch_models(settings: Settings, model_ids: list[str]) -> None:
+    """Download warmup GGUFs on the host so easyllama owns byte progress."""
+    import yaml
+
+    config = yaml.safe_load(resolve_ls_config(settings).read_text(encoding="utf-8")) or {}
+    macros = config.get("macros", {})
+    models = config.get("models", {})
+    for model_id in model_ids:
+        command = str(models.get(model_id, {}).get("cmd", ""))
+        match = re.search(r"(?:^|\\s)-hf\\s+(\\S+)", command)
+        if not match:
+            continue
+        spec = match.group(1)
+        for _ in range(len(macros)):
+            expanded = re.sub(
+                r"\\$\\{([A-Za-z0-9_-]+)\\}",
+                lambda item: str(macros.get(item.group(1), item.group(0))),
+                spec,
+            )
+            if expanded == spec:
+                break
+            spec = expanded
+        repo, selector = hf_spec(spec)
+        if repo and selector:
+            LOGGER.info("Preparing %s locally before starting %s", repo, model_id)
+            hf_get(
+                repo,
+                hf_file(repo, selector, model_id, suffixes=(".gguf",)),
+                model_id,
+                cache_dir=settings.models_dir,
+            )
 
 
 def warmup_models(settings: Settings, model_ids: list[str]) -> int:
@@ -197,6 +233,7 @@ def warmup_models(settings: Settings, model_ids: list[str]) -> int:
     if not selected_ids:
         LOGGER.warning("No models selected for warmup")
         return 0
+    _prefetch_models(settings, selected_ids)
     failure_states = {"error", "failed", "stopped", "terminated"}
     total_models = len(selected_ids)
     for index, model_id in enumerate(selected_ids, start=1):
@@ -210,7 +247,8 @@ def warmup_models(settings: Settings, model_ids: list[str]) -> int:
             start_template="Warming model {position}/{count}: {name}",
             update_template=(
                 "Warming model {position}/{count}: {name} "
-                "({downloaded}s elapsed, ETA <= {remaining}s, HTTP {http_status}, state={state})"
+                "({elapsed}s elapsed, state={state}, initial HTTP {http_status}; "
+                "download rate/ETA unavailable from llama-swap)"
             ),
             finish_template="Warmed model {position}/{count}: {name} in {downloaded}s",
             format_args={
@@ -218,42 +256,28 @@ def warmup_models(settings: Settings, model_ids: list[str]) -> int:
                 "count": total_models,
                 "http_status": "?",
                 "state": "starting",
+                "elapsed": 0,
             },
         )
         reporter.start()
-        last_status: int | None = None
+        # One upstream health request starts the worker.  Polling it while the
+        # worker is downloading/loading can produce 429 responses and cannot
+        # provide download progress; `/running` is the authoritative state.
+        last_status, _ = _http_response(
+            f"{base_url}/upstream/{model_id}/health",
+            headers=headers,
+            timeout=warmup_poll_interval,
+        )
         while time.monotonic() < deadline:
-            status, detail = _http_response(
-                f"{base_url}/upstream/{model_id}/health",
-                headers=headers,
-                timeout=warmup_poll_interval,
-            )
-            last_status = status
-            if 200 <= status < 400:
-                _update_warmup_progress(
-                    reporter,
-                    started_at=started_at,
-                    warmup_timeout=warmup_timeout,
-                    status=status,
-                    item={"state": "ready"},
-                )
-                reporter.finish()
-                break
             item = model_status(
                 settings, model_id, headers=headers, timeout=warmup_poll_interval
             )
             if item and item.get("state") == "ready":
-                LOGGER.warning(
-                    "warmup health request returned HTTP %s for %s, "
-                    "but the model is ready; treating it as warmed",
-                    status,
-                    model_id,
-                )
                 _update_warmup_progress(
                     reporter,
                     started_at=started_at,
                     warmup_timeout=warmup_timeout,
-                    status=status,
+                    status=last_status,
                     item=item,
                 )
                 reporter.finish()
@@ -266,17 +290,11 @@ def warmup_models(settings: Settings, model_ids: list[str]) -> int:
                     raise SystemExit(
                         f"failed to warm model {model_id}: state={state}{detail_suffix}"
                     )
-            detail = detail.strip()
-            if status >= 500 and detail:
-                raise SystemExit(
-                    f"failed to warm model {model_id}: upstream health returned "
-                    f"HTTP {status}: {detail}"
-                )
             _update_warmup_progress(
                 reporter,
                 started_at=started_at,
                 warmup_timeout=warmup_timeout,
-                status=status,
+                status=last_status,
                 item=item,
             )
             time.sleep(warmup_poll_interval)

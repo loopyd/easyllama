@@ -5,6 +5,36 @@ Release history pulled from GitHub releases:
 
 Format follows Keep a Changelog style where possible, based on published release notes.
 
+## [v0.3.15] - 2026-07-24
+
+Patch release focused on keeping the complete NVFP retrieval worker set resident after warmup and accurately reporting model-download versus server-load progress.
+
+### Added
+
+- **Resident NVFP worker set**: Added a llama-swap matrix expression for the chat, embedding, query-generation, and reranking workers. With `globalTTL: 0`, a no-argument `./run.sh --mode nvfp warmup` keeps the warmed set in VRAM; `qmd-embed` remains an alias rather than a duplicate embedding process.
+- **Hugging Face cache prefetch progress**: Warmup now prefetches the configured Hugging Face model files and reports actual byte progress, transfer rate, and ETA while they download.
+- Added narrow assertion-based checks for download progress formatting and warmup polling behavior.
+
+### Changed
+
+- **Warmup status wording**: Server-side model loading now reports elapsed time, state, and the initial HTTP status without implying that llama-swap exposes a download rate or ETA.
+- Documented the NVFP resident-worker requirement and post-restart warmup step in the README and example configuration.
+
+### Fixed
+
+- Synced `easyllama.__version__` with the packaged project version.
+- Ignore local `.pi-subagents/` artifacts.
+
+### Validation
+
+- `python test_download_progress.py`
+- `python test_warmup_progress.py`
+
+### Links
+
+- Release: [v0.3.15](https://github.com/loopyd/easyllama/releases/tag/v0.3.15)
+- Compare: [v0.3.14...v0.3.15](https://github.com/loopyd/easyllama/compare/v0.3.14...v0.3.15)
+
 ## [v0.3.14] - 2026-07-24
 
 Feature release: new `nvfp` mode for RTX 5090 Blackwell NVFP4 MoE inference, pycurl-based download progress with rate/ETA, and dependency migration to pyproject.toml.
