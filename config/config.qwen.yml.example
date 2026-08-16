@@ -1,8 +1,8 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/mostlygeek/llama-swap/refs/heads/main/config-schema.json
 #
-# Local runtime configuration template for MTP mode.
-# Copy this file to config/config.mtp.yml for local edits and overrides.
-# Qwen3.8 NVFP4 chat uses vLLM MTP; auxiliary GGUF routes remain on llama.cpp.
+# Local runtime configuration template for Qwen mode.
+# Copy this file to config/config.qwen.yml for local edits and overrides.
+# Qwen3.8 NVFP4 chat uses raw ModelOpt weights; auxiliary GGUF routes remain on llama.cpp.
 
 healthCheckTimeout: 1800
 logLevel: info
@@ -18,13 +18,13 @@ macros:
   server_bin: "/opt/venv/bin/easyllama"
   vllm_wrapper_bin: "/app/bin/vllm-wrapper"
   vllm_bin: "/opt/venv/bin/vllm"
-  qwen3_chat_target_hf: "unsloth/Qwen3.8-27B-NVFP4"
+  qwen3_chat_target_hf: "RadixArk/Qwen3.8-27B-NVFP4"
   pi_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
 models:
   "qwen3-chat":
     concurrencyLimit: 1
-    name: "Qwen3.8 Chat 27B NVFP4 MTP"
-    description: "Primary chat/completions model served by vLLM with MTP speculative decoding"
+    name: "Qwen3.8 Chat 27B NVFP4"
+    description: "Primary chat/completions model served from raw ModelOpt NVFP4 weights by vLLM"
     cmd: |
       ${vllm_wrapper_bin}
       serve
@@ -55,7 +55,6 @@ models:
       --enable-auto-tool-choice
       --tool-call-parser qwen3_coder
       --enable-sleep-mode
-      --speculative-config '{"method":"mtp","num_speculative_tokens":1}'
       --enable-chunked-prefill
     cmdStop: |
       ${vllm_wrapper_bin}
@@ -77,7 +76,7 @@ models:
       ${server_bin}
       server
       basic
-      --bin /app/bin/llama-server-mtp
+      --bin /app/bin/llama-server-qwen
       --port ${PORT}
       -hf ${pi_emb_hf_model}
       --ctx-size 131072

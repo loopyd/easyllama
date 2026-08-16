@@ -7,6 +7,12 @@ Format follows Keep a Changelog style where possible, based on published release
 
 ## [Unreleased]
 
+### Changed
+
+- Renamed the `mtp` runtime profile to `qwen`, including its config files, Docker target, image tag, and auxiliary llama-server path.
+- Replaced the Unsloth MTP checkpoint with raw `RadixArk/Qwen3.8-27B-NVFP4` ModelOpt weights and disabled speculative decoding.
+- Updated current README and API references for the Qwen profile's 128K configured context and FP8 KV cache.
+
 ## [v0.4.0] - 2026-08-15
 
 Feature release adding the hybrid vLLM MTP runtime and simplifying shipped model profiles.

@@ -1,7 +1,7 @@
 ---
 name: easyllama-tune
 description: 'Tune easyllama chat-model fit for a chosen mode: gpu layers, KV cache quantization, ctx-size, warmup 502/250 failures, and full-context ceilings.'
-argument-hint: 'mode=mtp, quants=q5_1, ctx=262144, max_gpu_layers=60'
+argument-hint: 'mode=qwen, quants=q5_1, ctx=131072, max_gpu_layers=60'
 ---
 
 # Fit Tuning

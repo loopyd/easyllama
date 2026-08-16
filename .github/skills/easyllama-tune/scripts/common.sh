@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 REPO_ROOT="$(cd -- "${SKILL_ROOT}/../../.." && pwd)"
 
-MODE="${MODE:-mtp}"
+MODE="${MODE:-qwen}"
 ACTIVE_CONFIG="${ACTIVE_CONFIG:-}"
 EXAMPLE_CONFIG="${EXAMPLE_CONFIG:-}"
 MODEL_ID="${MODEL_ID:-}"

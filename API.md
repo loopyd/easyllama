@@ -46,7 +46,7 @@ These stable IDs are exposed through `/v1/models`.
 | --- | --- |
 | `basic` | `unsloth/Qwen3.6-27B-GGUF:Q4_K_M` |
 | `turboquant` | `unsloth/Qwen3.6-27B-GGUF:UD-Q5_K_XL` |
-| `mtp` | `unsloth/Qwen3.8-27B-NVFP4` (vLLM with built-in MTP speculative decoding, 256K context, FP8 KV cache with dynamic GPU allocation and an 8 GiB native CPU offload buffer, and at most 32 scheduled sequences per iteration) |
+| `qwen` | `RadixArk/Qwen3.8-27B-NVFP4` (raw ModelOpt weights served by vLLM without speculative decoding, 128K configured context, and FP8 KV cache) |
 | `spiritbuun` | target `unsloth/Qwen3.6-27B-GGUF:Q5_K_M`, draft `Ardenzard/Qwen3.6-27B-DFlash-GGUF:Qwen3.6-27B-DFlash-Q5_K_M.gguf` |
 | `lucebox` | target `unsloth/Qwen3.6-27B-GGUF:Q4_K_M`, draft `KingsonHO/Qwen3.6-27B-DFlash:model.safetensors` |
 
@@ -54,7 +54,7 @@ These stable IDs are exposed through `/v1/models`.
 
 Read this table first if choosing route by task or by mode.
 
-| Endpoint | `basic` | `turboquant` | `mtp` | `spiritbuun` | `lucebox` | Notes |
+| Endpoint | `basic` | `turboquant` | `qwen` | `spiritbuun` | `lucebox` | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
 | `GET /health` | ✅ | ✅ | ✅ | ✅ | ✅ | Plain-text health check |
 | `GET /v1/models` | ✅ | ✅ | ✅ | ✅ | ✅ | Lists configured model IDs |

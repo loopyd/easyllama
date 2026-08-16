@@ -46,8 +46,8 @@ DEFAULT_BIN = Path("/app/bin/llama-server-basic")
             ),
         ),
         RuntimeModeMetadata(
-            mode="mtp",
-            docker_target="runtime-mtp",
+            mode="qwen",
+            docker_target="runtime-qwen",
             backend="vllm",
             build_sources=(
                 BuildSource(

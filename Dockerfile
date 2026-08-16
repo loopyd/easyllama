@@ -269,15 +269,15 @@ RUN mkdir -p /app/bin \
     && ln -sf /opt/llama.cpp-spiritbuun/bin/llama-server /app/bin/llama-server-spiritbuun
 ENV LD_LIBRARY_PATH=/opt/llama.cpp-spiritbuun/bin:/usr/local/cuda/lib64
 
-FROM builder-base AS mtp-builder
+FROM builder-base AS qwen-builder
 ARG BUILD_MODE=basic
 ARG LLAMA_CPP_REPO=https://github.com/ggml-org/llama.cpp.git
 ARG LLAMA_CPP_REF=master
 ARG CMAKE_CUDA_ARCHITECTURES=120
 RUN --mount=type=cache,id=llamacpp-ccache,target=/root/.cache/ccache,sharing=locked \
-    if [ "${BUILD_MODE}" = "mtp" ]; then \
-        git clone --depth 1 --branch "${LLAMA_CPP_REF}" "${LLAMA_CPP_REPO}" /src/llama.cpp-mtp \
-        && cd /src/llama.cpp-mtp \
+    if [ "${BUILD_MODE}" = "qwen" ]; then \
+        git clone --depth 1 --branch "${LLAMA_CPP_REF}" "${LLAMA_CPP_REPO}" /src/llama.cpp-qwen \
+        && cd /src/llama.cpp-qwen \
         && cmake -B build \
         -DGGML_CUDA=ON \
         -DCMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES}" \
@@ -292,8 +292,8 @@ RUN --mount=type=cache,id=llamacpp-ccache,target=/root/.cache/ccache,sharing=loc
         && cmake --build build --config Release -j"$(nproc)" --target llama-server \
         && ccache --show-stats; \
     else \
-        mkdir -p /src/llama.cpp-mtp/build/bin /src/llama.cpp-mtp/gguf-py /src/llama.cpp-mtp/models/templates \
-        && : > /src/llama.cpp-mtp/convert_hf_to_gguf.py; \
+        mkdir -p /src/llama.cpp-qwen/build/bin /src/llama.cpp-qwen/gguf-py /src/llama.cpp-qwen/models/templates \
+        && : > /src/llama.cpp-qwen/convert_hf_to_gguf.py; \
     fi
 
 # Build the Qwen3.8-capable vLLM revision on the same CUDA/Ubuntu base used by
@@ -323,7 +323,7 @@ RUN --mount=type=cache,id=llamacpp-pip-cache,target=/root/.cache/pip,sharing=loc
     && /opt/vllm-build/bin/pip install -r requirements/build/cuda.txt \
     && /opt/vllm-build/bin/python setup.py bdist_wheel --dist-dir /dist
 
-FROM runtime-base AS runtime-mtp
+FROM runtime-base AS runtime-qwen
 WORKDIR /app
 COPY --from=vllm-builder /dist/ /tmp/vllm-dist/
 COPY pyproject.toml /app/
@@ -332,10 +332,10 @@ COPY run.sh /app/
 COPY scripts/log-exec.sh /app/bin/log-exec
 COPY --from=vllm-wrapper-build /install/llama-swap /app/bin/llama-swap
 COPY --from=vllm-wrapper-build /install/vllm-wrapper /app/bin/vllm-wrapper
-COPY --from=mtp-builder /src/llama.cpp-mtp/build/bin/ /opt/llama.cpp-mtp/bin/
-COPY --from=mtp-builder /src/llama.cpp-mtp/convert_hf_to_gguf.py /opt/llama.cpp/convert_hf_to_gguf.py
-COPY --from=mtp-builder /src/llama.cpp-mtp/gguf-py/ /opt/llama.cpp/gguf-py/
-COPY --from=mtp-builder /src/llama.cpp-mtp/models/templates/ /opt/llama.cpp/models/templates/
+COPY --from=qwen-builder /src/llama.cpp-qwen/build/bin/ /opt/llama.cpp-qwen/bin/
+COPY --from=qwen-builder /src/llama.cpp-qwen/convert_hf_to_gguf.py /opt/llama.cpp/convert_hf_to_gguf.py
+COPY --from=qwen-builder /src/llama.cpp-qwen/gguf-py/ /opt/llama.cpp/gguf-py/
+COPY --from=qwen-builder /src/llama.cpp-qwen/models/templates/ /opt/llama.cpp/models/templates/
 RUN python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --upgrade pip \
     && /opt/venv/bin/pip install \
@@ -348,11 +348,11 @@ RUN python3 -m venv /opt/venv \
         sentencepiece tqdm uvicorn \
     && rm -rf /tmp/vllm-dist \
     && chmod 755 /app/run.sh /app/bin/log-exec \
-    && ln -sf /opt/llama.cpp-mtp/bin/llama-server /app/bin/llama-server-mtp
+    && ln -sf /opt/llama.cpp-qwen/bin/llama-server /app/bin/llama-server-qwen
 ENV PYTHONUNBUFFERED=1
 ENV PATH=/opt/venv/bin:/usr/local/bin:/app/bin:${PATH}
 ENV GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
-ENV LD_LIBRARY_PATH=/opt/llama.cpp-mtp/bin:/usr/local/cuda/lib64
+ENV LD_LIBRARY_PATH=/opt/llama.cpp-qwen/bin:/usr/local/cuda/lib64
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl --fail --silent http://127.0.0.1:8080/health >/dev/null || exit 1
