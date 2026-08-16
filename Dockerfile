@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7-labs
-ARG CUDA_VERSION=13.1.0
+ARG CUDA_VERSION=13.0.3
 
 # ── Download llama-swap binary (multi-model orchestrator) ───
 FROM ubuntu:24.04 AS ls-download
@@ -17,9 +17,10 @@ RUN ARCH=$(dpkg --print-architecture) && \
     tar xzf /tmp/ls.tar.gz -C /install/
 
 # vllm-wrapper is an upstream llama-swap command but is not in release tarballs.
-FROM golang:1.26-bookworm AS vllm-wrapper-build
+FROM golang:alpine AS vllm-wrapper-build
 ARG LS_VERSION=v250
-RUN git clone --depth 1 --branch "${LS_VERSION}" https://github.com/mostlygeek/llama-swap.git /src/llama-swap \
+RUN apk add --no-cache git \
+    && git clone --depth 1 --branch "${LS_VERSION}" https://github.com/mostlygeek/llama-swap.git /src/llama-swap \
     && cd /src/llama-swap \
     # Keep the daemon outside llama-swap's proxy process group so it survives proxy unload.
     && sed -i '/cmd := exec.Command(startArgs\[0\], startArgs\[1:\]...)/a\    cmd.SysProcAttr = \&syscall.SysProcAttr{Setsid: true}' cmd/vllm-wrapper/main.go \
@@ -49,13 +50,6 @@ ARG CMAKE_CUDA_ARCHITECTURES=120
 ENV CUDA_STUBS=/usr/local/cuda/lib64/stubs
 ENV CCACHE_DIR=/root/.cache/ccache
 ENV TZ=${HOST_TZ}
-
-RUN mkdir -p /usr/share/keyrings \
-    && gpg --batch --no-default-keyring --keyring /etc/apt/trusted.gpg \
-    --export A4B469963BF863CC > /usr/share/keyrings/nvidia-cuda-archive-keyring.gpg \
-    && printf '%s\n' \
-    'deb [signed-by=/usr/share/keyrings/nvidia-cuda-archive-keyring.gpg] https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64 /' \
-    > /etc/apt/sources.list.d/cuda.list
 
 RUN --mount=type=cache,id=llamacpp-apt-cache-builder,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=llamacpp-apt-lists-builder,target=/var/lib/apt/lists,sharing=locked \
@@ -102,22 +96,20 @@ ARG HOST_LANG=C.UTF-8
 ARG HOST_LC_ALL=C.UTF-8
 ENV TZ=${HOST_TZ}
 
-RUN mkdir -p /usr/share/keyrings \
-    && gpg --batch --no-default-keyring --keyring /etc/apt/trusted.gpg \
-    --export A4B469963BF863CC > /usr/share/keyrings/nvidia-cuda-archive-keyring.gpg \
-    && printf '%s\n' \
-    'deb [signed-by=/usr/share/keyrings/nvidia-cuda-archive-keyring.gpg] https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64 /' \
-    > /etc/apt/sources.list.d/cuda.list
-
 RUN --mount=type=cache,id=llamacpp-apt-cache-runtime,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=llamacpp-apt-lists-runtime,target=/var/lib/apt/lists,sharing=locked \
     apt-get update \
     && DEBCONF_NOWARNINGS=yes apt-get install -y --no-install-recommends apt-utils \
     && apt-get install -y --no-install-recommends \
     libgomp1 \
+    gcc \
+    libc6-dev \
+    cuda-nvcc-13-0 \
+    libcurand-dev-13-0 \
     curl \
     jq \
     python3 \
+    python3-dev \
     python3-pip \
     python3-venv \
     ca-certificates \
@@ -304,10 +296,36 @@ RUN --mount=type=cache,id=llamacpp-ccache,target=/root/.cache/ccache,sharing=loc
         && : > /src/llama.cpp-mtp/convert_hf_to_gguf.py; \
     fi
 
-# Qwen3.8 support currently ships in vLLM's official qwen38 image. Keep the
-# llama.cpp auxiliary server in this image for embeddings, expansion, and reranking.
-FROM vllm/vllm-openai:qwen38 AS runtime-mtp
+# Build the Qwen3.8-capable vLLM revision on the same CUDA/Ubuntu base used by
+# llama.cpp instead of inheriting the independently maintained qwen38 image.
+FROM builder-base AS vllm-builder
+ARG VLLM_REPO=https://github.com/vllm-project/vllm.git
+# RTX 5090 / Blackwell only: avoid compiling legacy SM75-SM110 kernels.
+ENV VLLM_TARGET_DEVICE=cuda
+# vLLM derives each component's family-specific gencode from this list.
+# Do not also set CMAKE_CUDA_ARCHITECTURES/CUDAARCHS: that duplicates sm_120
+# beside sm_120f for Blackwell-family kernels and nvcc rejects the build.
+ENV TORCH_CUDA_ARCH_LIST=12.0
+RUN --mount=type=cache,id=llamacpp-pip-cache,target=/root/.cache/pip,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends python3 python3-dev python3-pip python3-venv ninja-build \
+    && rm -rf /var/lib/apt/lists/* \
+    && git clone --depth 1 "${VLLM_REPO}" /src/vllm \
+    && cd /src/vllm \
+    # Model inspection imports a bundled flash-attention extension. Build FA2 \
+    # retargeted by TORCH_CUDA_ARCH_LIST to SM120; skip Hopper-specific FA3. \
+    && sed -i 's|        ext_modules.append(CMakeExtension(name="vllm.vllm_flash_attn._vllm_fa3_C"))|        pass  # Skip Hopper-specific FA3 kernels|' setup.py \
+    && python3 -m venv /opt/vllm-build \
+    && /opt/vllm-build/bin/pip install --upgrade pip wheel \
+    && /opt/vllm-build/bin/pip install \
+        --extra-index-url https://download.pytorch.org/whl/cu130 \
+        torch==2.13.0 \
+    && /opt/vllm-build/bin/pip install -r requirements/build/cuda.txt \
+    && /opt/vllm-build/bin/python setup.py bdist_wheel --dist-dir /dist
+
+FROM runtime-base AS runtime-mtp
 WORKDIR /app
+COPY --from=vllm-builder /dist/ /tmp/vllm-dist/
 COPY pyproject.toml /app/
 COPY easyllama/ /app/easyllama/
 COPY run.sh /app/
@@ -318,14 +336,21 @@ COPY --from=mtp-builder /src/llama.cpp-mtp/build/bin/ /opt/llama.cpp-mtp/bin/
 COPY --from=mtp-builder /src/llama.cpp-mtp/convert_hf_to_gguf.py /opt/llama.cpp/convert_hf_to_gguf.py
 COPY --from=mtp-builder /src/llama.cpp-mtp/gguf-py/ /opt/llama.cpp/gguf-py/
 COPY --from=mtp-builder /src/llama.cpp-mtp/models/templates/ /opt/llama.cpp/models/templates/
-RUN python3 -m pip install --no-cache-dir --no-deps /app \
-    && python3 -m pip install --no-cache-dir \
+RUN python3 -m venv /opt/venv \
+    && /opt/venv/bin/pip install --upgrade pip \
+    && /opt/venv/bin/pip install \
+        --extra-index-url https://download.pytorch.org/whl/cu130 \
+        torch==2.13.0 \
+    && /opt/venv/bin/pip install /tmp/vllm-dist/*.whl \
+    && /opt/venv/bin/pip install --no-deps /app \
+    && /opt/venv/bin/pip install \
         colorama docker fastapi huggingface_hub jinja2 protobuf pycurl pyyaml \
         sentencepiece tqdm uvicorn \
+    && rm -rf /tmp/vllm-dist \
     && chmod 755 /app/run.sh /app/bin/log-exec \
     && ln -sf /opt/llama.cpp-mtp/bin/llama-server /app/bin/llama-server-mtp
 ENV PYTHONUNBUFFERED=1
-ENV PATH=/usr/local/bin:/app/bin:${PATH}
+ENV PATH=/opt/venv/bin:/usr/local/bin:/app/bin:${PATH}
 ENV GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
 ENV LD_LIBRARY_PATH=/opt/llama.cpp-mtp/bin:/usr/local/cuda/lib64
 EXPOSE 8080

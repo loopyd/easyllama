@@ -37,16 +37,10 @@ def detect_runtime_mode(value: str | None = None) -> str:
     return selected
 
 
-def cuda_architectures(self) -> str:
-    """Resolve CUDA architectures from configuration or detected GPUs.
-
-    Args:
-        settings: The settings.
-
-    Returns:
-        str: The compute cuda architectures result."""
-    if self.settings.cmake_cuda_architectures != "auto":
-        return self.settings.cmake_cuda_architectures
+def cuda_architectures(settings: Config) -> str:
+    """Resolve CUDA architectures from configuration or detected GPUs."""
+    if settings.cmake_cuda_architectures != "auto":
+        return settings.cmake_cuda_architectures
     result = subprocess.run(
         ["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader"],
         capture_output=True,
@@ -56,9 +50,9 @@ def cuda_architectures(self) -> str:
     if result.returncode != 0:
         LOGGER.warning(
             "nvidia-smi not found or failed; using fallback CUDA arch %s",
-            self.settings.default_cuda_architectures,
+            settings.default_cuda_architectures,
         )
-        return self.settings.default_cuda_architectures
+        return settings.default_cuda_architectures
     values: set[str] = set()
     for line in result.stdout.splitlines():
         match = re.findall(r"\d+", line)
@@ -70,9 +64,9 @@ def cuda_architectures(self) -> str:
     if not values:
         LOGGER.warning(
             "failed to detect compute capability; using fallback CUDA arch %s",
-            self.settings.default_cuda_architectures,
+            settings.default_cuda_architectures,
         )
-        return self.settings.default_cuda_architectures
+        return settings.default_cuda_architectures
     return ";".join(sorted(values, key=int))
 
 
@@ -236,7 +230,7 @@ class DockerRuntime:
             "HOST_TZ": self.settings.host_tz,
             "HOST_LANG": self.settings.host_lang,
             "HOST_LC_ALL": self.settings.host_lc_all,
-            "CMAKE_CUDA_ARCHITECTURES": self.cuda_architectures(),
+            "CMAKE_CUDA_ARCHITECTURES": cuda_architectures(self.settings),
         }
         build_args.update(mode_metadata.build_args(self.settings))
         LOGGER.info(

@@ -11,46 +11,8 @@ globalTTL: 0
 # Shared llama-server arguments.
 macros:
   server_bin: "/opt/venv/bin/easyllama"
-  llama_server_bin: "/app/bin/llama-server-turboquant"
-  kv_ctx_size: "131072"
   qwen3_chat_target_hf: "unsloth/Qwen3.6-27B-GGUF:UD-Q5_K_XL"
   pi_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
-  n_predict: "-1"
-  temp: "0.65"
-  top_k: "20"
-  top_p: "0.95"
-  min_p: "0.0"
-  sampler_seq: "edskypmxt"
-  repeat_last_n: "2048"
-  repeat_penalty: "1.01"
-  presence_penalty: "1.0"
-  frequency_penalty: "0.0"
-  dry_multiplier: "0.0"
-  dry_base: "1.75"
-  dry_allowed_length: "2"
-  dry_penalty_last_n: "2048"
-  batch_size: "2048"
-  ubatch_size: "512"
-  parallel: "1"
-  flash_attn: "on"
-  fit: "on"
-  cache_type_k: "turbo4"
-  cache_type_v: "turbo3"
-  poll: "1"
-  no_mmap: "--no-mmap"
-  kv_unified: "--kv-unified"
-  cache_idle_slots: "--cache-idle-slots"
-  backend_sampling: "--backend-sampling"
-  web_ui_off: "--no-webui"
-  no_warmup: "--no-warmup"
-  jinja_on: "--jinja"
-  chat_template_file: "/chat_template/qwen3.6.jinja"
-  chat_template_kwargs: '{\"tokenize\":false,\"add_generation_prompt\":true,\"enable_thinking\":false,\"preserve_thinking\":false}'
-  emb_cache_type_k: "f16"
-  emb_cache_type_v: "f16"
-  rerank_batch_size: "2048"
-  rerank_ubatch_size: "2048"
-  rerank_ctx_size: "4096"
 
 models:
   "qwen3-chat":
@@ -69,38 +31,38 @@ models:
       ${server_bin}
       server
       basic
-      --bin ${llama_server_bin}
+      --bin /app/bin/llama-server-turboquant
       --port ${PORT}
       -hf ${qwen3_chat_target_hf}
-      --ctx-size ${kv_ctx_size}
-      --n-predict ${n_predict}
-      --temp ${temp}
-      --top-k ${top_k}
-      --top-p ${top_p}
-      --min-p ${min_p}
-      --sampler-seq ${sampler_seq}
-      --repeat-last-n ${repeat_last_n}
-      --repeat-penalty ${repeat_penalty}
-      --presence-penalty ${presence_penalty}
-      --frequency-penalty ${frequency_penalty}
-      --dry-multiplier ${dry_multiplier}
-      --dry-base ${dry_base}
-      --dry-allowed-length ${dry_allowed_length}
-      --dry-penalty-last-n ${dry_penalty_last_n}
-      --batch-size ${batch_size}
-      --ubatch-size ${ubatch_size}
-      --parallel ${parallel}
-      --fit ${fit}
-      --flash-attn ${flash_attn}
-      --cache-type-k ${cache_type_k}
-      --cache-type-v ${cache_type_v}
-      ${kv_unified}
-      ${cache_idle_slots}
-      ${backend_sampling}
-      ${web_ui_off}
-      ${no_mmap}
-      --poll ${poll}
-      --chat-template-kwargs ${chat_template_kwargs}
+      --ctx-size 131072
+      --n-predict -1
+      --temp 0.65
+      --top-k 20
+      --top-p 0.95
+      --min-p 0.0
+      --sampler-seq edskypmxt
+      --repeat-last-n 2048
+      --repeat-penalty 1.01
+      --presence-penalty 1.0
+      --frequency-penalty 0.0
+      --dry-multiplier 0.0
+      --dry-base 1.75
+      --dry-allowed-length 2
+      --dry-penalty-last-n 2048
+      --batch-size 2048
+      --ubatch-size 512
+      --parallel 1
+      --fit on
+      --flash-attn on
+      --cache-type-k turbo4
+      --cache-type-v turbo3
+      --kv-unified
+      --cache-idle-slots
+      --backend-sampling
+      --no-webui
+      --no-mmap
+      --poll 1
+      --chat-template-kwargs {\"tokenize\":false,\"add_generation_prompt\":true,\"enable_thinking\":false,\"preserve_thinking\":false}
       --reasoning off
 
     env:
@@ -114,20 +76,20 @@ models:
       ${server_bin}
       server
       basic
-      --bin ${llama_server_bin}
+      --bin /app/bin/llama-server-turboquant
       --port ${PORT}
       -hf ${pi_emb_hf_model}
-      --ctx-size ${kv_ctx_size}
-      --batch-size ${batch_size}
-      --ubatch-size ${ubatch_size}
-      --parallel ${parallel}
-      --flash-attn ${flash_attn}
-      --cache-type-k ${emb_cache_type_k}
-      --cache-type-v ${emb_cache_type_v}
-      ${kv_unified}
-      ${no_mmap}
+      --ctx-size 131072
+      --batch-size 2048
+      --ubatch-size 512
+      --parallel 1
+      --flash-attn on
+      --cache-type-k f16
+      --cache-type-v f16
+      --kv-unified
+      --no-mmap
       --embedding
-      ${no_warmup}
+      --no-warmup
 
     env:
       - "HF_TOKEN=${env.HF_TOKEN}"

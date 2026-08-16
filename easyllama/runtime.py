@@ -12,11 +12,11 @@ import threading
 import time
 import types
 
-from config import LLAMA_SWAP_BIN, RUNTIME_HOST, Config
-from helpers.hf import HuggingFace
-from helpers.http import Http
-from helpers.logger import LOG as APP_LOG
-from helpers.progress import ProgressReporter
+from .config import LLAMA_SWAP_BIN, RUNTIME_HOST, Config
+from .helpers.hf import HuggingFace
+from .helpers.http import Http
+from .helpers.logger import LOG as APP_LOG
+from .helpers.progress import ProgressReporter
 
 LOGGER = APP_LOG.get(__name__)
 
@@ -186,7 +186,7 @@ def warmup_models(settings: Config, model_ids: list[str]) -> int:
     warmup_timeout = int(settings.env("WARMUP_TIMEOUT", "1800") or "1800")
     warmup_poll_interval = float(settings.env("WARMUP_POLL_INTERVAL", "2") or "2")
     if settings.runtime_mode == RUNTIME_HOST:
-        from helpers.docker import DockerRuntime
+        from .helpers.docker import DockerRuntime
 
         runtime = DockerRuntime(settings)
         runtime.ensure_daemon()

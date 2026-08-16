@@ -6,11 +6,11 @@ import argparse
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from config import RUNTIME_CONTAINER, Config
-from helpers.docker import DockerRuntime
-from helpers.logger import LOG as APP_LOG
-from runtime import serve, warmup_models
-from servers import defs as server_defs, mode_names, run as run_server
+from .config import RUNTIME_CONTAINER, Config
+from .helpers.docker import DockerRuntime
+from .helpers.logger import LOG as APP_LOG
+from .runtime import serve, warmup_models
+from .servers import defs as server_defs, mode_names, run as run_server
 
 Handler = Callable[[argparse.Namespace, list[str]], int]
 Configurer = Callable[[argparse.ArgumentParser], None]

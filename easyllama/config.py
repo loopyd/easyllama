@@ -11,7 +11,7 @@ import re
 import tempfile
 from typing import ClassVar
 
-from helpers.common import (
+from .helpers.common import (
     absolute_path,
     detect_timezone,
     image_name_for_mode,
@@ -19,10 +19,10 @@ from helpers.common import (
     normalize_mode,
     project_root,
 )
-from helpers.hf import HuggingFace
-from helpers.http import Http
-from helpers.logger import LOG as APP_LOG
-from servers import mode_names
+from .helpers.hf import HuggingFace
+from .helpers.http import Http
+from .helpers.logger import LOG as APP_LOG
+from .servers import mode_names
 
 LOGGER = APP_LOG.get(__name__)
 RUNTIME_HOST = "host"
@@ -181,7 +181,7 @@ class Config:
             Config: The load result."""
         root_dir = project_root()
         defaults, config_defaults = load_pyproject(root_dir)
-        from helpers.docker import detect_runtime_mode
+        from .helpers.docker import detect_runtime_mode
 
         runtime_mode = detect_runtime_mode(runtime_mode_override)
         mode = normalize_mode(mode_override or self.env("MODE"))

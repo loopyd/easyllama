@@ -12,56 +12,8 @@ globalTTL: 0
 # Shared llama-server argument macros
 macros:
   server_bin: "/opt/venv/bin/easyllama"
-  llama_server_bin: "/app/bin/llama-server-spiritbuun"
-  chat_ctx_size: "262144"
-  emb_ctx_size: "262144"
-  chat_hf_model: "unsloth/Qwen3.6-27B-GGUF:Q5_K_M"
-  draft_hf_model: "Ardenzard/Qwen3.6-27B-DFlash-GGUF:Qwen3.6-27B-DFlash-Q5_K_M.gguf"
   emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
-  chat_n_predict: "-1"
-  chat_temp: "0.7"
-  top_k: "20"
-  top_p: "0.95"
-  min_p: "0.0"
-  sampler_seq: "edskypmxt"
-  repeat_last_n: "512"
-  repeat_penalty: "1.05"
-  presence_penalty: "1.5"
-  frequency_penalty: "0.0"
-  dry_multiplier: "0.0"
-  dry_base: "1.75"
-  dry_allowed_length: "2"
-  dry_penalty_last_n: "2048"
-  chat_batch_size: "256"
-  chat_ubatch_size: "64"
-  emb_batch_size: "1024"
-  emb_ubatch_size: "256"
-  parallel: "1"
-  flash_attn: "on"
-  fit: "on"
-  chat_cache_type_k: "turbo4"
-  chat_cache_type_v: "turbo4"
-  emb_cache_type_k: "f16"
-  emb_cache_type_v: "f16"
-  draft_cache_type_k: "f16"
-  draft_cache_type_v: "f16"
-  poll: "1"
-  no_mmap: "--no-mmap"
-  kv_unified: "--kv-unified"
-  cache_idle_slots: "--cache-idle-slots"
-  backend_sampling: "--backend-sampling"
-  web_ui_off: "--no-webui"
-  jinja_on: "--jinja"
-  no_warmup: "--no-warmup"
-  mmproj_arg: "${env.EASYLLAMA_MMPROJ_ARG}"
-  chat_template_file: "/chat_template/qwen3.6.jinja"
-  chat_template_kwargs: '{\"tokenize\":false,\"add_generation_prompt\":true,\"enable_thinking\":false,\"preserve_thinking\":false}'
   draft_context: "256"
-  draft_max: "8"
-  draft_min: "1"
-  draft_p_min: "0.75"
-  draft_gpu_layers: "all"
-  context_shift: "--context-shift"
 
 models:
   "qwen3-chat":
@@ -80,34 +32,34 @@ models:
       ${server_bin}
       server
       spiritbuun
-      --bin ${llama_server_bin}
+      --bin /app/bin/llama-server-spiritbuun
       --port ${PORT}
-      --target-hf ${chat_hf_model}
-      --draft-hf ${draft_hf_model}
-      --ctx-size ${chat_ctx_size}
+      --target-hf unsloth/Qwen3.6-27B-GGUF:Q5_K_M
+      --draft-hf Ardenzard/Qwen3.6-27B-DFlash-GGUF:Qwen3.6-27B-DFlash-Q5_K_M.gguf
+      --ctx-size 262144
       --keep -1
-      --n-predict ${chat_n_predict}
-      --temp ${chat_temp}
-      --batch-size ${chat_batch_size}
-      --ubatch-size ${chat_ubatch_size}
-      --parallel ${parallel}
-      --flash-attn ${flash_attn}
-      --cache-type-k ${chat_cache_type_k}
-      --cache-type-v ${chat_cache_type_v}
-      --cache-type-k-draft ${draft_cache_type_k}
-      --cache-type-v-draft ${draft_cache_type_v}
+      --n-predict -1
+      --temp 0.7
+      --batch-size 256
+      --ubatch-size 64
+      --parallel 1
+      --flash-attn on
+      --cache-type-k turbo4
+      --cache-type-v turbo4
+      --cache-type-k-draft f16
+      --cache-type-v-draft f16
       --cache-ram 0
-      --gpu-layers-draft ${draft_gpu_layers}
-      ${web_ui_off}
-      ${no_warmup}
-      ${no_mmap}
-      ${context_shift}
-      --chat-template-kwargs ${chat_template_kwargs}
+      --gpu-layers-draft all
+      --no-webui
+      --no-warmup
+      --no-mmap
+      --context-shift
+      --chat-template-kwargs {\"tokenize\":false,\"add_generation_prompt\":true,\"enable_thinking\":false,\"preserve_thinking\":false}
       --reasoning off
       -cd ${draft_context}
-      --draft-max ${draft_max}
-      --draft-min ${draft_min}
-      --draft-p-min ${draft_p_min}
+      --draft-max 8
+      --draft-min 1
+      --draft-p-min 0.75
 
     env:
       - "HF_TOKEN=${env.HF_TOKEN}"
@@ -120,20 +72,20 @@ models:
       ${server_bin}
       server
       basic
-      --bin ${llama_server_bin}
+      --bin /app/bin/llama-server-spiritbuun
       --port ${PORT}
       -hf ${emb_hf_model}
-      --ctx-size ${emb_ctx_size}
-      --batch-size ${emb_batch_size}
-      --ubatch-size ${emb_ubatch_size}
-      --parallel ${parallel}
-      --flash-attn ${flash_attn}
-      --cache-type-k ${emb_cache_type_k}
-      --cache-type-v ${emb_cache_type_v}
-      ${kv_unified}
-      ${no_mmap}
+      --ctx-size 262144
+      --batch-size 1024
+      --ubatch-size 256
+      --parallel 1
+      --flash-attn on
+      --cache-type-k f16
+      --cache-type-v f16
+      --kv-unified
+      --no-mmap
       --embedding
-      ${no_warmup}
+      --no-warmup
 
     env:
       - "HF_TOKEN=${env.HF_TOKEN}"

@@ -16,63 +16,21 @@ hooks:
 
 macros:
   server_bin: "/usr/local/bin/easyllama"
-  llama_server_bin: "/app/bin/llama-server-mtp"
   vllm_wrapper_bin: "/app/bin/vllm-wrapper"
-  vllm_bin: "/usr/local/bin/vllm"
-  vllm_url: "http://127.0.0.1:18000"
-  chat_ctx_size: "155200"
-  chat_max_num_seqs: "2"
-  chat_max_num_batched_tokens: "8192"
-  chat_kv_offloading_size: "12"
-  emb_ctx_size: "131072"
+  vllm_bin: "/opt/venv/bin/vllm"
   qwen3_chat_target_hf: "unsloth/Qwen3.8-27B-NVFP4"
-  speculative_config: "'{\"method\":\"mtp\",\"num_speculative_tokens\":1}'"
   pi_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
-  n_predict: "-1"
-  temp: "0.7"
-  top_k: "20"
-  top_p: "0.80"
-  min_p: "0.0"
-  sampler_seq: "edskypmxt"
-  repeat_last_n: "512"
-  repeat_penalty: "1.0"
-  presence_penalty: "1.5"
-  frequency_penalty: "0.0"
-  dry_multiplier: "0.0"
-  dry_base: "1.75"
-  dry_allowed_length: "2"
-  dry_penalty_last_n: "512"
-  batch_size: "2048"
-  ubatch_size: "1024"
-  parallel: "1"
-  flash_attn: "on"
-  fit: "off"
-  cache_type_k: "q8_0"
-  cache_type_v: "q8_0"
-  poll: "0"
-  poll_batch: "0"
-  no_mmap: "--no-mmap"
-  web_ui_off: "--no-webui"
-  no_warmup: "--no-warmup"
-  jinja_on: "--jinja"
-  chat_template_file: "/chat_template/qwen3.6.jinja"
-  chat_template_kwargs: '{\"tokenize\":false,\"add_generation_prompt\":true,\"enable_thinking\":false,\"preserve_thinking\":false}'
-  emb_cache_type_k: "f16"
-  emb_cache_type_v: "f16"
-  rerank_batch_size: "2048"
-  rerank_ubatch_size: "2048"
-  rerank_ctx_size: "4096"
 models:
   "qwen3-chat":
     concurrencyLimit: 1
-    name: "Pi Qwen3.8 Chat 27B NVFP4 MTP"
+    name: "Qwen3.8 Chat 27B NVFP4 MTP"
     description: "Primary chat/completions model served by vLLM with MTP speculative decoding"
     cmd: |
       ${vllm_wrapper_bin}
       serve
-      --vllm-url ${vllm_url}
+      --vllm-url http://127.0.0.1:18000
       --listen :${PORT}
-      --sleep-level 2
+      --sleep-level 1
       --wait-timeout 1800s
       --
       /app/bin/log-exec
@@ -82,12 +40,11 @@ models:
       --host 127.0.0.1
       --port 18000
       --served-model-name qwen3-chat
-      --max-model-len ${chat_ctx_size}
-      --max-num-seqs ${chat_max_num_seqs}
-      --max-num-batched-tokens ${chat_max_num_batched_tokens}
+      --max-model-len 131072
+      --max-num-seqs 1
+      --max-num-batched-tokens 4096
       --kv-cache-dtype fp8
-      --kv-offloading-size ${chat_kv_offloading_size}
-      --gpu-memory-utilization 0.94
+      --gpu-memory-utilization 0.90
       --no-enable-flashinfer-autotune
       --enforce-eager
       --language-model-only
@@ -98,11 +55,12 @@ models:
       --enable-auto-tool-choice
       --tool-call-parser qwen3_coder
       --enable-sleep-mode
-      --speculative-config ${speculative_config}
+      --speculative-config '{"method":"mtp","num_speculative_tokens":1}'
+      --enable-chunked-prefill
     cmdStop: |
       ${vllm_wrapper_bin}
       sleep
-      --vllm-url ${vllm_url}
+      --vllm-url http://127.0.0.1:18000
       --sleep-level 2
       --stop-pid ${PID}
     env:
@@ -113,25 +71,25 @@ models:
 
   "qwen3-embeddings":
     concurrencyLimit: 4
-    name: "Pi Qwen3 Embeddings 8B"
+    name: "Qwen3 Embeddings 8B"
     description: "Dense embedding model for vector search, RAG, similarity"
     cmd: |
       ${server_bin}
       server
       basic
-      --bin ${llama_server_bin}
+      --bin /app/bin/llama-server-mtp
       --port ${PORT}
       -hf ${pi_emb_hf_model}
-      --ctx-size ${emb_ctx_size}
-      --batch-size ${batch_size}
-      --ubatch-size ${ubatch_size}
-      --parallel ${parallel}
-      --flash-attn ${flash_attn}
-      --cache-type-k ${emb_cache_type_k}
-      --cache-type-v ${emb_cache_type_v}
-      ${no_mmap}
+      --ctx-size 131072
+      --batch-size 2048
+      --ubatch-size 1024
+      --parallel 1
+      --flash-attn on
+      --cache-type-k f16
+      --cache-type-v f16
+      --no-mmap
       --embedding
-      ${no_warmup}
+      --no-warmup
     cmdStop: /bin/kill -TERM ${PID}
     env:
       - "HF_TOKEN=${env.HF_TOKEN}"
