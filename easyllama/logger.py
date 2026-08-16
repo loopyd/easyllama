@@ -58,7 +58,7 @@ class ColorFormatter(logging.Formatter):
 def resolve_level(verbosity: str | None = None, *, quiet: bool = False) -> int:
     if quiet:
         return logging.WARNING
-    env_level = os.environ.get("LLAMACPP_LOG_LEVEL") or os.environ.get("EASYLLAMA_LOG_LEVEL")
+    env_level = os.environ.get("EASYLLAMA_LOG_LEVEL")
     selected = (verbosity or env_level or DEFAULT_LEVEL).lower()
     return LEVEL_NAMES.get(selected, logging.DEBUG)
 
@@ -71,7 +71,8 @@ def configure_logging(
 ) -> None:
     colorama_init()
     handler = logging.StreamHandler()
-    use_color = not no_color and not os.environ.get("LLAMACPP_NO_COLOR")
+    no_color_env = os.environ.get("EASYLLAMA_NO_COLOR")
+    use_color = not no_color and not no_color_env
     handler.setFormatter(ColorFormatter(use_color=use_color))
 
     root_logger = logging.getLogger()

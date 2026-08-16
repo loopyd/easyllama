@@ -75,7 +75,9 @@ class ProgressReporter:
 def hf_mmproj_url(spec: str) -> str:
     parts = spec.split("/", 2)
     if len(parts) != 3 or not all(parts):
-        raise SystemExit(f"LLAMACPP_HF_MMPROJ must be <owner>/<repo>/<file.gguf>; got: {spec}")
+        raise SystemExit(
+            f"EASYLLAMA_HF_MMPROJ must be <owner>/<repo>/<file.gguf>; got: {spec}"
+        )
     owner, repo, filename = parts
     return f"{HF_URL_BASE}/{owner}/{repo}/blob/main/{filename}"
 
@@ -197,12 +199,12 @@ def normalize_mode(value: str | None) -> str:
 
 
 def detect_runtime_mode(value: str | None = None) -> str:
-    selected = value or os.environ.get("LLAMACPP_RUNTIME_MODE")
+    selected = value or env_override("RUNTIME_MODE")
     if not selected:
         return "container" if Path("/.dockerenv").exists() else "host"
     if selected not in {"host", "container"}:
         allowed = ", ".join(("host", "container"))
-        raise SystemExit(f"unsupported LLAMACPP_RUNTIME_MODE={selected}; allowed: {allowed}")
+        raise SystemExit(f"unsupported EASYLLAMA_RUNTIME_MODE={selected}; allowed: {allowed}")
     return selected
 
 
@@ -240,9 +242,12 @@ def detect_timezone() -> str:
     return "UTC"
 
 
+def env_override(name: str, default: str | None = None) -> str | None:
+    return os.environ.get(f"EASYLLAMA_{name}", default)
+
+
 def image_name_for_mode(image_name_base: str, image_tag_base: str, mode: str) -> str:
-    explicit = os.environ.get("LLAMACPP_IMAGE_NAME")
-    base = explicit or image_name_base
+    base = env_override("IMAGE_NAME", image_name_base) or image_name_base
     if ":" in base:
         repository, tag = base.rsplit(":", 1)
         return f"{repository}:{tag}-{mode}"

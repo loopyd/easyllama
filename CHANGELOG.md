@@ -5,9 +5,55 @@ Release history pulled from GitHub releases:
 
 Format follows Keep a Changelog style where possible, based on published release notes.
 
+## [Unreleased]
+
+## [v0.4.0] - 2026-08-15
+
+Feature release adding the hybrid vLLM MTP runtime and simplifying shipped model profiles.
+
+### Added
+
+- Added explicit runtime backend metadata; the MTP profile selects vLLM while existing profiles remain llama.cpp-based.
+- Added a hybrid MTP image: Qwen3.8-27B NVFP4 chat uses vLLM MTP speculation, while auxiliary GGUF routes remain on llama.cpp.
+- Added llama-swap's upstream `vllm-wrapper` sleep/wake lifecycle for fast route switching.
+- Added regression coverage for backend selection, MTP configuration, Docker targets, and effective-config security.
+- Added verbose child-process logging with captured stdout, stderr, and exit status.
+- Added `logs --tail N`; without `--tail`, logs continue to stream live.
+
+### Changed
+
+- Updated llama-swap from v208 to v250.
+- Migrated MTP chat from Qwen3.6 GGUF to `unsloth/Qwen3.8-27B-NVFP4`.
+- Set vLLM `--max-num-seqs` to 32 for MTP chat, limiting the scheduler to 32 sequences per iteration rather than setting a token-batch size.
+- Corrected the documented Turboquant default and limited documented `POST /v1/messages` support to Lucebox.
+- Renamed default Docker resources to `easyllama-local` and `easyllama-server-swap` so project naming no longer implies a llama.cpp-only runtime.
+- Standardized public environment overrides on the `EASYLLAMA_*` project prefix across runtime settings, logging, warmup controls, and helper scripts. The former prefix is no longer supported.
+- Added safe legacy-default container migration: default-name lifecycle commands remove `llamacpp-server-swap` before starting `easyllama-server-swap`; legacy image tags are retained for manual cleanup.
+- Configured MTP startup to use eager execution and skip multimodal profiling; text-chat validation uses a 155,200-token context, FP8 KV cache, and 8 GiB native CPU KV offload.
+
+### Fixed
+
+- Host-side warmup prefetch now uses the Hugging Face token resolved from `auth.json`, while an explicit `HF_TOKEN` environment variable still takes precedence.
+
+### Removed
+
+- Removed the QMD generation, embedding-alias, and reranking models from every shipped profile.
+- Removed the legacy `nvfp` llama.cpp mode, its Docker target, and its configuration template. The MTP profile continues to use the Qwen3.8 NVFP4 checkpoint through vLLM.
+
+### Validation
+
+- Clean image rebuild and MTP server restart.
+- Qwen3.8-27B-NVFP4 MTP warmup completed successfully.
+- `qwen-combo` returned HTTP 200 and the expected chat response through the public endpoint.
+
+### Links
+
+- Release: [v0.4.0](https://github.com/loopyd/easyllama/releases/tag/v0.4.0)
+- Compare: [v0.3.16...v0.4.0](https://github.com/loopyd/easyllama/compare/v0.3.16...v0.4.0)
+
 ## [v0.3.16] - 2026-07-24
 
-Patch release for deterministic, custom NVFP warmup output.
+Patch release for deterministic, custom warmup output.
 
 ### Changed
 
@@ -26,7 +72,6 @@ Patch release for deterministic, custom NVFP warmup output.
 - `python test_warmup_progress.py`
 - `ruff check easyllama/servers/common.py easyllama/runtime.py easyllama/logger.py test_warmup_progress.py`
 - `python -m compileall -q easyllama`
-- Clean NVFP Docker rebuild and `./run.sh --mode nvfp warmup --` (all four models warmed successfully with only custom `INFO` output).
 
 ### Links
 
@@ -35,18 +80,16 @@ Patch release for deterministic, custom NVFP warmup output.
 
 ## [v0.3.15] - 2026-07-24
 
-Patch release focused on keeping the complete NVFP retrieval worker set resident after warmup and accurately reporting model-download versus server-load progress.
+Patch release focused on accurately reporting model-download versus server-load progress.
 
 ### Added
 
-- **Resident NVFP worker set**: Added a llama-swap matrix expression for the chat, embedding, query-generation, and reranking workers. With `globalTTL: 0`, a no-argument `./run.sh --mode nvfp warmup` keeps the warmed set in VRAM; `qmd-embed` remains an alias rather than a duplicate embedding process.
 - **Hugging Face cache prefetch progress**: Warmup now prefetches the configured Hugging Face model files and reports actual byte progress, transfer rate, and ETA while they download.
 - Added narrow assertion-based checks for download progress formatting and warmup polling behavior.
 
 ### Changed
 
 - **Warmup status wording**: Server-side model loading now reports elapsed time, state, and the initial HTTP status without implying that llama-swap exposes a download rate or ETA.
-- Documented the NVFP resident-worker requirement and post-restart warmup step in the README and example configuration.
 
 ### Fixed
 
@@ -65,11 +108,10 @@ Patch release focused on keeping the complete NVFP retrieval worker set resident
 
 ## [v0.3.14] - 2026-07-24
 
-Feature release: new `nvfp` mode for RTX 5090 Blackwell NVFP4 MoE inference, pycurl-based download progress with rate/ETA, and dependency migration to pyproject.toml.
+Feature release for pycurl-based download progress with rate/ETA and dependency migration to pyproject.toml.
 
 ### Added
 
-- **NVFP mode**: New `--mode nvfp` for RTX 5090 Blackwell NVFP4 MoE chat. Builds a `runtime-nvfp` Docker target that symlinks the MTP llama-server binary, loads `Qwen3.6-35B-A3B-NVFP4-Q4_K_M` with 262,144-token context and Flash Attention enabled. See README for setup.
 - **Download progress with rate & ETA**: Replaced `urllib` download with `pycurl` in `_download_file()`. Downloads now log byte progress, current transfer speed, and ETA every five seconds during downloads.
 - **Warmup timeout on health checks**: Added `timeout` parameter to `_http_json`, `_http_response`, and `model_status`; warmup polling now times out per-request instead of hanging indefinitely.
 - **Elapsed time display in warmup**: Warmup reporter now shows `{downloaded}s elapsed, ETA <= {remaining}s` in its update template for clearer progress feedback.
@@ -81,7 +123,7 @@ Feature release: new `nvfp` mode for RTX 5090 Blackwell NVFP4 MoE inference, pyc
 - **Install commands updated in README**: Minimal install now uses `pip install .`; editable dev install uses `pip install -e ".[dev]"`.
 - **Dockerfile build stage**: Runtime stage now creates venv and installs via `pip install /app` from pyproject.toml instead of `--no-deps` from requirements.txt.
 - **Docker imports in runtime.py**: Replaced lazy `import docker` with explicit top-level imports from `docker`, `docker.errors`, and `docker.types` for better type safety.
-- **API.md**: Added `nvfp` and updated `mtp` model references.
+- **API.md**: Updated `mtp` model references.
 
 ### Fixed
 

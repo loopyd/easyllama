@@ -1,29 +1,18 @@
+# Chat template support
 
-# Chat Template Support
+`./run.sh start` and `./run.sh restart` mount this directory at
+`/chat_template` inside the container.
 
-By default, this directory is mounted into the container at /chat_template when you run ./run.sh start or ./run.sh restart.
+Override the host directory with `EASYLLAMA_CHAT_TEMPLATE_DIR`.
 
-The host source path is configured by container.chat_template_dir (or LLAMACPP_CHAT_TEMPLATE_DIR).
+## Path mapping
 
-## Path Mapping
+Set the llama-swap model command's `--chat-template-file` argument to a mounted
+path such as:
 
-Set `inference.chat_template_file` in `config.json` using either:
-
-- `<model_alias>.jinja` (bare filename)
-- `chat_template/<model_alias>.jinja` (repo-relative path)
-
-The launcher resolves both forms to the mounted container path and passes `--chat-template-file /chat_template/<model_alias>.jinja`.
-
-## Example
-
-```json
-{
-    ...
-	"inference": {
-        ...
-        "chat_template_file": "qwen3.6.jinja"
-        ...
-	}
-    ...
-}
+```yaml
+--chat-template-file /chat_template/qwen3.6.jinja
 ```
+
+The MTP vLLM chat route uses the model's native template; the auxiliary
+llama.cpp routes may use templates from this directory.

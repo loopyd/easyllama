@@ -2,27 +2,26 @@
 #
 # Local runtime configuration template for MTP mode.
 # Copy this file to config/config.mtp.yml for local edits and overrides.
-# Multi-Token Prediction via ggml-org/llama.cpp main (PR #22673 merged 2026-05-16).
-# Uses --spec-type draft-mtp (renamed from 'mtp' on 2026-05-13).
+# Qwen3.8 NVFP4 chat uses vLLM MTP; auxiliary GGUF routes remain on llama.cpp.
 
 healthCheckTimeout: 1800
-logLevel: info
+logLevel: debug
 sendLoadingState: false
 globalTTL: 0
 
 macros:
-  server_bin: "/opt/venv/bin/easyllama"
-  chat_threads: "8"
-  chat_threads_batch: "16"
-  chat_gpu_layers: "99"
+  server_bin: "/usr/local/bin/easyllama"
   llama_server_bin: "/app/bin/llama-server-mtp"
-  chat_ctx_size: "131072"
-  qmd_ctx_size: "131072"
-  qwen3_chat_target_hf: "unsloth/Qwen3.6-27B-MTP-GGUF:Qwen3.6-27B-UD-Q4_K_XL.gguf"
+  vllm_wrapper_bin: "/app/bin/vllm-wrapper"
+  vllm_bin: "/usr/local/bin/vllm"
+  vllm_url: "http://127.0.0.1:18000"
+  chat_ctx_size: "155200"
+  chat_max_num_seqs: "32"
+  chat_kv_offloading_size: "8"
+  emb_ctx_size: "131072"
+  qwen3_chat_target_hf: "unsloth/Qwen3.8-27B-NVFP4"
+  speculative_config: "'{\"method\":\"mtp\",\"num_speculative_tokens\":3}'"
   pi_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
-  qmd_chat_hf_model: "tobil/qmd-query-expansion-1.7B-gguf:Q8_0"
-  qmd_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
-  qmd_rerank_hf_model: "mradermacher/Qwen3-Reranker-8B-GGUF:Q5_K_M"
   n_predict: "-1"
   temp: "0.7"
   top_k: "20"
@@ -57,56 +56,52 @@ macros:
   rerank_batch_size: "2048"
   rerank_ubatch_size: "2048"
   rerank_ctx_size: "4096"
-  spec_type: "draft-mtp"
-  spec_draft_n_max: "3"
-
 models:
   "qwen3-chat":
-    name: "Pi Qwen3 Chat 27B MTP"
-    description: "Primary chat/completions model with MTP speculative decoding (2x+ throughput)"
+    concurrencyLimit: 4
+    name: "Pi Qwen3.8 Chat 27B NVFP4 MTP"
+    description: "Primary chat/completions model served by vLLM with MTP speculative decoding"
     cmd: |
-      ${server_bin}
-      server
-      basic
-      --bin ${llama_server_bin}
-      --port ${PORT}
-      --threads ${chat_threads}
-      --threads-batch ${chat_threads_batch}
-      -hf ${qwen3_chat_target_hf}
-      --ctx-size ${chat_ctx_size}
-      --n-predict ${n_predict}
-      --temp ${temp}
-      --top-k ${top_k}
-      --top-p ${top_p}
-      --min-p ${min_p}
-      --sampler-seq ${sampler_seq}
-      --repeat-last-n ${repeat_last_n}
-      --repeat-penalty ${repeat_penalty}
-      --presence-penalty ${presence_penalty}
-      --frequency-penalty ${frequency_penalty}
-      --dry-multiplier ${dry_multiplier}
-      --dry-base ${dry_base}
-      --dry-allowed-length ${dry_allowed_length}
-      --dry-penalty-last-n ${dry_penalty_last_n}
-      --batch-size ${batch_size}
-      --ubatch-size ${ubatch_size}
-      --parallel ${parallel}
-      --fit ${fit}
-      --gpu-layers ${chat_gpu_layers}
-      --flash-attn ${flash_attn}
-      --cache-type-k ${cache_type_k}
-      --cache-type-v ${cache_type_v}
-      --spec-type ${spec_type}
-      --spec-draft-n-max ${spec_draft_n_max}
-      ${web_ui_off}
-      ${no_mmap}
-      --poll ${poll}
-      --poll-batch ${poll_batch}
-      --chat-template-kwargs ${chat_template_kwargs}
+      ${vllm_wrapper_bin}
+      serve
+      --vllm-url ${vllm_url}
+      --listen :${PORT}
+      --wait-timeout 1800s
+      --
+      /app/bin/log-exec
+      ${vllm_bin}
+      serve
+      ${qwen3_chat_target_hf}
+      --host 127.0.0.1
+      --port 18000
+      --served-model-name qwen3-chat
+      --max-model-len ${chat_ctx_size}
+      --max-num-seqs ${chat_max_num_seqs}
+      --kv-cache-dtype fp8
+      --kv-offloading-size ${chat_kv_offloading_size}
+      --enforce-eager
+      --skip-mm-profiling
+      --uvicorn-log-level debug
+      --enable-log-requests
+      --log-error-stack
+      --reasoning-parser qwen3
+      --enable-auto-tool-choice
+      --tool-call-parser qwen3_coder
+      --enable-sleep-mode
+      --speculative-config ${speculative_config}
+    cmdStop: |
+      ${vllm_wrapper_bin}
+      sleep
+      --vllm-url ${vllm_url}
+      --stop-pid ${PID}
     env:
       - "HF_TOKEN=${env.HF_TOKEN}"
+      - "VLLM_SERVER_DEV_MODE=1"
+      - "VLLM_LOGGING_LEVEL=DEBUG"
+      - "PYTHONFAULTHANDLER=1"
 
   "qwen3-embeddings":
+    concurrencyLimit: 4
     name: "Pi Qwen3 Embeddings 8B"
     description: "Dense embedding model for vector search, RAG, similarity"
     cmd: |
@@ -116,7 +111,7 @@ models:
       --bin ${llama_server_bin}
       --port ${PORT}
       -hf ${pi_emb_hf_model}
-      --ctx-size ${qmd_ctx_size}
+      --ctx-size ${emb_ctx_size}
       --batch-size ${batch_size}
       --ubatch-size ${ubatch_size}
       --parallel ${parallel}
@@ -126,102 +121,8 @@ models:
       ${no_mmap}
       --embedding
       ${no_warmup}
-    env:
-      - "HF_TOKEN=${env.HF_TOKEN}"
-
-  "qmd-generate":
-    name: "QMD Query Expansion"
-    description: "Alias for QMD query expansion and OpenAI-compatible completions"
-    filters:
-      setParams:
-        reasoning: "off"
-        chat_template_kwargs:
-          tokenize: false
-          add_generation_prompt: true
-          enable_thinking: false
-          preserve_thinking: false
-    cmd: |
-      ${server_bin}
-      server
-      basic
-      --bin ${llama_server_bin}
-      --port ${PORT}
-      -hf ${qmd_chat_hf_model}
-      --ctx-size ${qmd_ctx_size}
-      --n-predict ${n_predict}
-      --temp ${temp}
-      --top-k ${top_k}
-      --top-p ${top_p}
-      --min-p ${min_p}
-      --sampler-seq ${sampler_seq}
-      --repeat-last-n ${repeat_last_n}
-      --repeat-penalty ${repeat_penalty}
-      --presence-penalty ${presence_penalty}
-      --frequency-penalty ${frequency_penalty}
-      --dry-multiplier ${dry_multiplier}
-      --dry-base ${dry_base}
-      --dry-allowed-length ${dry_allowed_length}
-      --dry-penalty-last-n ${dry_penalty_last_n}
-      --batch-size ${batch_size}
-      --ubatch-size ${ubatch_size}
-      --parallel ${parallel}
-      --fit ${fit}
-      --flash-attn ${flash_attn}
-      --cache-type-k ${cache_type_k}
-      --cache-type-v ${cache_type_v}
-      ${web_ui_off}
-      ${no_warmup}
-      ${no_mmap}
-      --poll ${poll}
-      ${jinja_on}
-      --chat-template-file ${chat_template_file}
-      --chat-template-kwargs ${chat_template_kwargs}
-      --reasoning off
-    env:
-      - "HF_TOKEN=${env.HF_TOKEN}"
-
-  "qmd-embed":
-    name: "QMD Embedding"
-    description: "Alias for QMD /v1/embeddings requests"
-    cmd: |
-      ${server_bin}
-      server
-      basic
-      --bin ${llama_server_bin}
-      --port ${PORT}
-      -hf ${qmd_emb_hf_model}
-      --ctx-size ${qmd_ctx_size}
-      --batch-size ${batch_size}
-      --ubatch-size ${ubatch_size}
-      --parallel ${parallel}
-      --flash-attn ${flash_attn}
-      --cache-type-k ${emb_cache_type_k}
-      --cache-type-v ${emb_cache_type_v}
-      ${no_mmap}
-      --embedding
-      ${no_warmup}
-    env:
-      - "HF_TOKEN=${env.HF_TOKEN}"
-
-  "qmd-rerank":
-    name: "Qwen3 Reranker 8B"
-    description: "Cross-encoder reranking model for QMD /v1/rerank requests"
-    cmd: |
-      ${server_bin}
-      server
-      basic
-      --bin ${llama_server_bin}
-      --port ${PORT}
-      -hf ${qmd_rerank_hf_model}
-      --ctx-size ${rerank_ctx_size}
-      --batch-size ${rerank_batch_size}
-      --ubatch-size ${rerank_ubatch_size}
-      --parallel ${parallel}
-      --flash-attn ${flash_attn}
-      --cache-type-k ${emb_cache_type_k}
-      --cache-type-v ${emb_cache_type_v}
-      ${no_mmap}
-      --reranking
-      ${no_warmup}
+    cmdStop: |
+      pkill -KILL -P ${PID}
+      kill -KILL ${PID}
     env:
       - "HF_TOKEN=${env.HF_TOKEN}"

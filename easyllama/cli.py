@@ -84,7 +84,7 @@ def _logs_handler(args: argparse.Namespace, extra_args: list[str]) -> int:
     if extra_args:
         raise SystemExit(f"unexpected args for logs: {' '.join(extra_args)}")
     settings = load_settings(mode_override=args.mode)
-    return DockerRuntime(settings).print_logs()
+    return DockerRuntime(settings).print_logs(tail=args.tail)
 
 
 def _status_handler(args: argparse.Namespace, extra_args: list[str]) -> int:
@@ -118,6 +118,10 @@ def _warmup_config(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("models", nargs="*")
 
 
+def _logs_config(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--tail", type=lambda value: max(1, int(value)), metavar="N")
+
+
 def _clean_config(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--all-images", action="store_true")
 
@@ -140,7 +144,12 @@ def command_tree() -> tuple[CommandNode, ...]:
         CommandNode(
             name="restart", help="Restart the selected mode container", handler=_restart_handler
         ),
-        CommandNode(name="logs", help="Follow runtime logs", handler=_logs_handler),
+        CommandNode(
+            name="logs",
+            help="Follow runtime logs or show the last N lines",
+            handler=_logs_handler,
+            configure_parser=_logs_config,
+        ),
         CommandNode(name="status", help="Show runtime container status", handler=_status_handler),
         CommandNode(
             name="clean",

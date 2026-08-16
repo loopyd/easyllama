@@ -9,7 +9,7 @@ MODE="${MODE:-mtp}"
 ACTIVE_CONFIG="${ACTIVE_CONFIG:-}"
 EXAMPLE_CONFIG="${EXAMPLE_CONFIG:-}"
 MODEL_ID="${MODEL_ID:-}"
-CONTAINER_NAME="${CONTAINER_NAME:-llamacpp-server-swap}"
+CONTAINER_NAME="${CONTAINER_NAME:-easyllama-server-swap}"
 VALIDATE_CONFIG_SCRIPT="${VALIDATE_CONFIG_SCRIPT:-${REPO_ROOT}/.github/skills/easyllama-provider/scripts/validate-config-yaml.sh}"
 
 default_python() {
@@ -27,16 +27,15 @@ resolve_mode_config_paths() {
     return 0
   fi
 
-  mapfile -t resolved_paths < <(MODE_NAME="${MODE}" OVERRIDE="${LLAMACPP_LS_CONFIG_FILE:-}" "${PYTHON_BIN}" - <<'PY'
+  mapfile -t resolved_paths < <(MODE_NAME="${MODE}" "${PYTHON_BIN}" - <<'PY'
 import os
 
 from easyllama.config import load_settings
 
 settings = load_settings(mode_override=os.environ["MODE_NAME"])
 config_pair = settings.configs[settings.mode]
-override = os.environ.get("OVERRIDE") or ""
 
-print(override or config_pair.active)
+print(settings.config_override or config_pair.active)
 print(config_pair.example)
 PY
 )

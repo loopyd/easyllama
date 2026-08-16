@@ -22,30 +22,43 @@ class BuildSource:
     ref_attr: str
     repo_build_arg: str
     ref_build_arg: str
+    default_repo: str | None = None
+    default_ref: str | None = None
+
+    def values(self, settings: Settings) -> tuple[str, str]:
+        repo = str(getattr(settings, self.repo_attr))
+        ref = str(getattr(settings, self.ref_attr))
+        repo_overridden = "EASYLLAMA_LLAMA_CPP_REPO" in os.environ
+        ref_overridden = "EASYLLAMA_LLAMA_CPP_REF" in os.environ
+        if self.repo_attr == "llama_cpp_repo" and not repo_overridden:
+            repo = self.default_repo or repo
+        if self.ref_attr == "llama_cpp_ref" and not ref_overridden:
+            ref = self.default_ref or ref
+        return repo, ref
 
     def summary(self, settings: Settings) -> str:
-        return (
-            f"{self.label}={getattr(settings, self.repo_attr)}"
-            f"@{getattr(settings, self.ref_attr)}"
-        )
+        repo, ref = self.values(settings)
+        return f"{self.label}={repo}@{ref}"
 
     def build_args(self, settings: Settings) -> dict[str, str]:
-        return {
-            self.repo_build_arg: str(getattr(settings, self.repo_attr)),
-            self.ref_build_arg: str(getattr(settings, self.ref_attr)),
-        }
+        repo, ref = self.values(settings)
+        return {self.repo_build_arg: repo, self.ref_build_arg: ref}
 
 
 @dataclass(frozen=True, slots=True)
 class RuntimeModeMetadata:
     mode: str
     docker_target: str
+    backend: str = "llamacpp"
     build_sources: tuple[BuildSource, ...] = ()
 
     def build_summary(self, settings: Settings, *, image_name: str, target: str) -> str:
         details = " ".join(source.summary(settings) for source in self.build_sources)
         suffix = f" {details}" if details else ""
-        return f"building {image_name} (mode={self.mode} target={target}{suffix})"
+        return (
+            f"building {image_name} "
+            f"(mode={self.mode} backend={self.backend} target={target}{suffix})"
+        )
 
     def build_args(self, settings: Settings) -> dict[str, str]:
         build_args: dict[str, str] = {}

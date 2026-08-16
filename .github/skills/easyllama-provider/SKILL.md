@@ -52,9 +52,10 @@ Create or update a provider mode for this repository without reintroducing hardc
 
 5. Update documentation in one pass.
 
-   - Update `README.md` for the mode overview, default model table, commands, config file list, and endpoint matrix.
-   - Keep the README release-ready: remove migration notes, stale release notes, and implementation trivia that do not help users run the mode.
-   - If behavior or config shape changes, update the matching `config.*.yml.example` file in the same change.
+   - Update `README.md` for the mode overview, default model table, commands, and config file list.
+   - Update `API.md` for endpoint coverage and request examples.
+   - Keep docs release-ready: describe tracked templates and shipped behavior, not ignored local overrides or stale migration details.
+   - If behavior or config shape changes, update the matching `config/config.<mode>.yml.example` in the same change.
 
 6. Run code-level validation.
 
@@ -76,9 +77,9 @@ Create or update a provider mode for this repository without reintroducing hardc
 
 9. Run the public endpoint regression suite.
 
-   Use the [public endpoint regression script](./scripts/test-public-endpoints.sh). Pass the mode name as the first argument. The script covers `GET /health`, `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/completions`, `POST /v1/responses`, both `POST /v1/embeddings` aliases, `POST /v1/rerank`, and `GET /ui/`. It automatically checks `POST /v1/messages` for `lucebox`, and you can force that route for another provider with `--messages`.
+   Use the [public endpoint regression script](./scripts/test-public-endpoints.sh). Pass the mode name as the first argument.    The script covers `GET /health`, `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/completions`, `POST /v1/responses`, `POST /v1/embeddings`, and `GET /ui/`. It checks `POST /v1/messages` for `lucebox`, the only shipped mode with a project-owned messages route. Use `--messages` only when validating a newly implemented equivalent route.
 
-   The script validates minimal response shape, not just status codes: advertised model IDs, assistant content for chat-style responses, non-empty embedding vectors with matching dimensions across aliases, and one rerank result per input document.
+   The script validates minimal response shape, not just status codes: advertised model IDs, assistant content for chat-style responses, and non-empty embedding vectors.
 
 10. If validation fails, debug locally before expanding scope.
 

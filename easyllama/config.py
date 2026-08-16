@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -16,6 +17,7 @@ from .helpers import (
     absolute_path,
     detect_runtime_mode,
     detect_timezone,
+    env_override,
     hf_mmproj_url,
     image_name_for_mode,
     known_modes,
@@ -83,7 +85,6 @@ class Settings:
         return load_settings(mode_override=mode, runtime_mode_override=self.runtime_mode)
 
 
-
 def load_settings(
     *,
     mode_override: str | None = None,
@@ -92,7 +93,7 @@ def load_settings(
     root_dir = project_root()
     defaults, config_defaults = load_pyproject(root_dir)
     runtime_mode = detect_runtime_mode(runtime_mode_override)
-    mode = normalize_mode(mode_override or os.environ.get("LLAMACPP_MODE"))
+    mode = normalize_mode(mode_override or env_override("MODE"))
 
     image_name_base = str(defaults["image_name_base"])
     image_tag_base = str(defaults["image_tag_base"])
@@ -103,61 +104,68 @@ def load_settings(
         )
         for mode_name in known_modes()
     }
-    config_override = os.environ.get("LLAMACPP_LS_CONFIG_FILE")
+    config_override = env_override("LS_CONFIG_FILE")
     return Settings(
         root_dir=root_dir,
         runtime_mode=runtime_mode,
         mode=mode,
         image_name=image_name_for_mode(image_name_base, image_tag_base, mode),
-        container_name=os.environ.get("LLAMACPP_CONTAINER_NAME", str(defaults["container_name"])),
+        container_name=env_override("CONTAINER_NAME", str(defaults["container_name"]))
+        or str(defaults["container_name"]),
         host_port=int(
-            os.environ.get("LLAMACPP_HOST_PORT", str(defaults["host_port"]))
+            env_override("HOST_PORT", str(defaults["host_port"])) or str(defaults["host_port"])
         ),
         container_port=int(
-            os.environ.get("LLAMACPP_CONTAINER_PORT", str(defaults["container_port"]))
+            env_override("CONTAINER_PORT", str(defaults["container_port"]))
+            or str(defaults["container_port"])
         ),
         pids_limit=int(str(defaults.get("pids_limit", 256))),
         models_dir=absolute_path(
-            root_dir, os.environ.get("LLAMACPP_MODELS_DIR", str(defaults["models_dir"]))
+            root_dir,
+            env_override("MODELS_DIR", str(defaults["models_dir"])) or str(defaults["models_dir"]),
         ),
         mmproj_dir=absolute_path(
-            root_dir, os.environ.get("LLAMACPP_MMPROJ_DIR", str(defaults["mmproj_dir"]))
+            root_dir,
+            env_override("MMPROJ_DIR", str(defaults["mmproj_dir"])) or str(defaults["mmproj_dir"]),
         ),
         chat_template_dir=absolute_path(
             root_dir,
-            os.environ.get("LLAMACPP_CHAT_TEMPLATE_DIR", str(defaults["chat_template_dir"])),
+            env_override("CHAT_TEMPLATE_DIR", str(defaults["chat_template_dir"]))
+            or str(defaults["chat_template_dir"]),
         ),
         auth_file=absolute_path(
-            root_dir, os.environ.get("LLAMACPP_AUTH_FILE", str(defaults["auth_file"]))
+            root_dir,
+            env_override("AUTH_FILE", str(defaults["auth_file"])) or str(defaults["auth_file"]),
         ),
         auth_example_file=absolute_path(root_dir, str(defaults["auth_example_file"])),
         runtime_dir=(root_dir / ".runtime").resolve(),
         config_override=absolute_path(root_dir, config_override) if config_override else None,
         configs=configs,
-        default_cuda_architectures=os.environ.get(
-            "LLAMACPP_DEFAULT_CUDA_ARCHITECTURES",
-            str(defaults["cuda_default_architectures"]),
-        ),
-        cmake_cuda_architectures=os.environ.get("LLAMACPP_CMAKE_CUDA_ARCHITECTURES", "auto"),
-        llama_cpp_repo=os.environ.get("LLAMACPP_LLAMA_CPP_REPO", str(defaults["llama_cpp_repo"])),
-        llama_cpp_ref=os.environ.get("LLAMACPP_LLAMA_CPP_REF", str(defaults["llama_cpp_ref"])),
-        lucebox_hub_repo=os.environ.get(
-            "LLAMACPP_LUCEBOX_HUB_REPO", str(defaults["lucebox_hub_repo"])
-        ),
-        lucebox_hub_ref=os.environ.get(
-            "LLAMACPP_LUCEBOX_HUB_REF", str(defaults["lucebox_hub_ref"])
-        ),
-        host_tz=os.environ.get("LLAMACPP_HOST_TZ", detect_timezone()),
-        host_lang=os.environ.get("LLAMACPP_HOST_LANG", os.environ.get("LANG", "C.UTF-8")),
-        host_lc_all=os.environ.get(
-            "LLAMACPP_HOST_LC_ALL", os.environ.get("LC_ALL", os.environ.get("LANG", "C.UTF-8"))
-        ),
+        default_cuda_architectures=env_override(
+            "DEFAULT_CUDA_ARCHITECTURES", str(defaults["cuda_default_architectures"])
+        )
+        or str(defaults["cuda_default_architectures"]),
+        cmake_cuda_architectures=env_override("CMAKE_CUDA_ARCHITECTURES", "auto") or "auto",
+        llama_cpp_repo=env_override("LLAMA_CPP_REPO", str(defaults["llama_cpp_repo"]))
+        or str(defaults["llama_cpp_repo"]),
+        llama_cpp_ref=env_override("LLAMA_CPP_REF", str(defaults["llama_cpp_ref"]))
+        or str(defaults["llama_cpp_ref"]),
+        lucebox_hub_repo=env_override("LUCEBOX_HUB_REPO", str(defaults["lucebox_hub_repo"]))
+        or str(defaults["lucebox_hub_repo"]),
+        lucebox_hub_ref=env_override("LUCEBOX_HUB_REF", str(defaults["lucebox_hub_ref"]))
+        or str(defaults["lucebox_hub_ref"]),
+        host_tz=env_override("HOST_TZ", detect_timezone()) or detect_timezone(),
+        host_lang=env_override("HOST_LANG", os.environ.get("LANG", "C.UTF-8")) or "C.UTF-8",
+        host_lc_all=env_override(
+            "HOST_LC_ALL", os.environ.get("LC_ALL", os.environ.get("LANG", "C.UTF-8"))
+        )
+        or "C.UTF-8",
     )
 
 
 def load_auth(settings: Settings) -> ResolvedAuth:
-    hf_token = os.environ.get("HF_TOKEN") or os.environ.get("LLAMACPP_HF_TOKEN")
-    api_key = os.environ.get("LLAMACPP_API_KEY") or os.environ.get("API_KEY")
+    hf_token = os.environ.get("HF_TOKEN") or env_override("HF_TOKEN")
+    api_key = env_override("API_KEY") or os.environ.get("API_KEY")
     if hf_token and api_key:
         return ResolvedAuth(hf_token=hf_token, api_key=api_key)
 
@@ -193,7 +201,7 @@ def resolve_ls_config(settings: Settings) -> Path:
         if not settings.config_override.is_file():
             raise SystemExit(
                 "no llama-swap config found at "
-                f"{settings.config_override}; set LLAMACPP_LS_CONFIG_FILE "
+                f"{settings.config_override}; set EASYLLAMA_LS_CONFIG_FILE "
                 "to a readable file"
             )
         return settings.config_override
@@ -210,7 +218,7 @@ def resolve_ls_config(settings: Settings) -> Path:
         return config_pair.example
     raise SystemExit(
         f"no llama-swap config found for {settings.mode} mode; "
-        "set LLAMACPP_LS_CONFIG_FILE or create "
+        "set EASYLLAMA_LS_CONFIG_FILE or create "
         f"{config_pair.active} from {config_pair.example}"
     )
 
@@ -222,13 +230,21 @@ def effective_config_path(settings: Settings, auth: ResolvedAuth) -> tuple[Path,
 
     settings.runtime_dir.mkdir(parents=True, exist_ok=True)
     effective_path = settings.runtime_dir / f"{config_path.name}.effective.yaml"
-    escaped_api_key = auth.api_key.replace("\\", "\\\\").replace('"', '\\"')
-    effective_path.write_text(
-        f'apiKeys:\n  - "{escaped_api_key}"\n' + config_path.read_text(encoding="utf-8"),
-        encoding="utf-8",
+    payload = f"apiKeys:\n  - {json.dumps(auth.api_key)}\n" + config_path.read_text(
+        encoding="utf-8"
     )
-    with suppress(OSError):
-        effective_path.chmod(0o600)
+    fd, temporary_name = tempfile.mkstemp(dir=settings.runtime_dir, prefix=".effective-")
+    temporary_path = Path(temporary_name)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as effective_file:
+            effective_file.write(payload)
+        temporary_path.replace(effective_path)
+    except BaseException:
+        with suppress(OSError):
+            os.close(fd)
+        temporary_path.unlink(missing_ok=True)
+        raise
     return effective_path, f"/app/config.d/{effective_path.name}"
 
 
@@ -246,7 +262,7 @@ def container_config_path(settings: Settings) -> Path:
     raise SystemExit(
         "no container config found under /app/config.d; "
         "mount one with run.sh start or set "
-        "LLAMACPP_LS_CONFIG_FILE inside the container"
+        "EASYLLAMA_LS_CONFIG_FILE inside the container"
     )
 
 
@@ -281,9 +297,6 @@ def resolved_api_key(settings: Settings, auth: ResolvedAuth) -> str | None:
                 return os.environ.get(env_match.group(1))
             return value or None
     return None
-
-
-
 
 
 def map_mmproj(settings: Settings, auth: ResolvedAuth, source: str) -> str:
@@ -324,18 +337,19 @@ def map_mmproj(settings: Settings, auth: ResolvedAuth, source: str) -> str:
         return f"{MMPROJ_DIR_CONTAINER}/{source}"
     if Path(source).is_absolute():
         raise SystemExit(
-            "LLAMACPP_MMPROJ_FILE must be in "
+            "EASYLLAMA_MMPROJ_FILE must be in "
             f"{settings.mmproj_dir}, use mmproj/<file>, or provide a URL"
         )
     return f"{MMPROJ_DIR_CONTAINER}/{source.removeprefix('./')}"
 
 
 def mmproj_arg(settings: Settings, auth: ResolvedAuth) -> str:
-    source = os.environ.get("LLAMACPP_MMPROJ_FILE")
-    if not source and os.environ.get("LLAMACPP_HF_MMPROJ"):
-        source = hf_mmproj_url(os.environ["LLAMACPP_HF_MMPROJ"])
+    source = env_override("MMPROJ_FILE")
+    hf_mmproj = env_override("HF_MMPROJ")
+    if not source and hf_mmproj:
+        source = hf_mmproj_url(hf_mmproj)
     # Do not automatically select a lone mmproj asset by default.
-    # Requiring explicit `LLAMACPP_MMPROJ_FILE` or `LLAMACPP_HF_MMPROJ` avoids
+    # Requiring explicit `EASYLLAMA_MMPROJ_FILE` or `EASYLLAMA_HF_MMPROJ` avoids
     # surprising behavior for modes (like turboquant) that do not specify one.
     if not source:
         return ""

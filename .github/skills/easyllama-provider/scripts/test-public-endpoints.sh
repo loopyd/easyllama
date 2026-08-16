@@ -91,10 +91,8 @@ cd "${REPO_ROOT}"
 BASE_URL="${BASE_URL:-http://127.0.0.1:8080}"
 AUTH_FILE="${AUTH_FILE:-${REPO_ROOT}/auth.json}"
 CHAT_MODEL="${CHAT_MODEL:-qwen3-chat}"
-GEN_MODEL="${GEN_MODEL:-qmd-generate}"
+GEN_MODEL="${GEN_MODEL:-${CHAT_MODEL}}"
 EMBED_MODEL="${EMBED_MODEL:-qwen3-embeddings}"
-QMD_EMBED_MODEL="${QMD_EMBED_MODEL:-qmd-embed}"
-RERANK_MODEL="${RERANK_MODEL:-qmd-rerank}"
 EXPECTED_EMBED_DIM="${EXPECTED_EMBED_DIM:-}"
 
 API_KEY_VALUE="${API_KEY:-}"
@@ -123,8 +121,6 @@ assert_jq "models response has data" '.data | type == "array" and length > 0' "$
 check_model_present "${models_json}" "${CHAT_MODEL}"
 check_model_present "${models_json}" "${GEN_MODEL}"
 check_model_present "${models_json}" "${EMBED_MODEL}"
-check_model_present "${models_json}" "${QMD_EMBED_MODEL}"
-check_model_present "${models_json}" "${RERANK_MODEL}"
 
 echo "+ POST /v1/chat/completions"
 chat_json="$(request_json POST /v1/chat/completions '{"model":"'"${CHAT_MODEL}"'","messages":[{"role":"user","content":"Reply with exactly ok."}],"max_tokens":16,"stream":false}')"
@@ -149,22 +145,9 @@ embed_json="$(request_json POST /v1/embeddings '{"model":"'"${EMBED_MODEL}"'","i
 assert_jq "embedding response has vectors" '.data[0].embedding | type == "array" and length > 0' "${embed_json}"
 embed_dim="$(jq -r '.data[0].embedding | length' <<<"${embed_json}")"
 
-echo "+ POST /v1/embeddings (${QMD_EMBED_MODEL})"
-qmd_embed_json="$(request_json POST /v1/embeddings '{"model":"'"${QMD_EMBED_MODEL}"'","input":"local llama embeddings smoke test"}')"
-assert_jq "qmd embedding response has vectors" '.data[0].embedding | type == "array" and length > 0' "${qmd_embed_json}"
-qmd_embed_dim="$(jq -r '.data[0].embedding | length' <<<"${qmd_embed_json}")"
-
-if [[ "${embed_dim}" != "${qmd_embed_dim}" ]]; then
-  fail "embedding alias dimension mismatch: ${embed_dim} != ${qmd_embed_dim}"
-fi
-
 if [[ -n "${EXPECTED_EMBED_DIM}" && "${embed_dim}" != "${EXPECTED_EMBED_DIM}" ]]; then
   fail "unexpected embedding dimension: got ${embed_dim}, expected ${EXPECTED_EMBED_DIM}"
 fi
-
-echo "+ POST /v1/rerank"
-rerank_json="$(request_json POST /v1/rerank '{"model":"'"${RERANK_MODEL}"'","query":"best local reranker for qmd search","documents":["Qwen3 Reranker 8B is a cross-encoder reranker served through /v1/rerank.","Qwen3 Embeddings 8B creates vectors for retrieval, not pairwise reranking.","QMD Query Expansion rewrites search prompts before retrieval and reranking."]}')"
-assert_jq "rerank returns one result per document" '.results | type == "array" and length == 3 and all(.[]; has("index") and has("relevance_score"))' "${rerank_json}"
 
 echo "+ GET /ui/"
 curl -fsS "${AUTH_ARGS[@]}" "${BASE_URL}/ui/" >/dev/null

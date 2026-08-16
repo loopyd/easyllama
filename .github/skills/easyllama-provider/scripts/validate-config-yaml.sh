@@ -114,7 +114,7 @@ done < <(yq_macro_keys "${CONFIG_PATH}")
 mapfile -t references < <(extract_references "${CONFIG_PATH}")
 unresolved=()
 for reference in "${references[@]}"; do
-  [[ "${reference}" == "PORT" ]] && continue
+  [[ "${reference}" == "PORT" || "${reference}" == "PID" ]] && continue
   [[ "${reference}" == env.* ]] && continue
   [[ -n "${macro_keys[${reference}]:-}" ]] && continue
   unresolved+=("${reference}")

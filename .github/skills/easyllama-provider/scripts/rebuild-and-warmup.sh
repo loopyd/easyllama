@@ -21,11 +21,6 @@ fi
 PYTHON_BIN="${PYTHON_BIN:-${DEFAULT_PYTHON}}"
 
 resolve_config_path() {
-  if [[ -n "${LLAMACPP_LS_CONFIG_FILE:-}" ]]; then
-    printf '%s\n' "${LLAMACPP_LS_CONFIG_FILE}"
-    return 0
-  fi
-
   MODE_NAME="${MODE}" "${PYTHON_BIN}" - <<'PY'
 import os
 

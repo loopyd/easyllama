@@ -27,7 +27,7 @@ def patch_luce_finish_reason(luce: Any) -> None:
         return
 
     source = inspect.getsource(luce.build_app)
-    non_stream_old = '''        msg: dict = {"role": "assistant"}
+    non_stream_old = """        msg: dict = {"role": "assistant"}
         finish_reason = "stop"
         if reasoning:
             msg["reasoning_content"] = reasoning
@@ -37,8 +37,8 @@ def patch_luce_finish_reason(luce: Any) -> None:
             finish_reason = "tool_calls"
         else:
             msg["content"] = cleaned
-'''
-    non_stream_new = '''        msg: dict = {"role": "assistant"}
+"""
+    non_stream_new = """        msg: dict = {"role": "assistant"}
         finish_reason = "length" if len(tokens) >= gen_len else "stop"
         if reasoning:
             msg["reasoning_content"] = reasoning
@@ -48,17 +48,17 @@ def patch_luce_finish_reason(luce: Any) -> None:
             finish_reason = "tool_calls"
         else:
             msg["content"] = cleaned
-'''
-    stream_old = '''                    finish_reason = "stop"
+"""
+    stream_old = """                    finish_reason = "stop"
                     if mode == "tool_buffer":
                         cleaned_after, tool_calls = parse_tool_calls(tool_buffer, tools=req.tools)
-'''
-    stream_new = '''                    finish_reason = (
+"""
+    stream_new = """                    finish_reason = (
                         "length" if completion_tokens >= gen_len else "stop"
                     )
                     if mode == "tool_buffer":
                         cleaned_after, tool_calls = parse_tool_calls(tool_buffer, tools=req.tools)
-'''
+"""
     if non_stream_old not in source or stream_old not in source:
         raise RuntimeError("unsupported Luce build_app source shape for finish_reason patch")
 
@@ -184,6 +184,8 @@ def load_luce() -> tuple[Any, Any, Any]:
 
     patch_luce_finish_reason(luce)
     return luce, JSONResponse, AutoTokenizer
+
+
 @server_metadata(
     name="lucebox",
     help="Run the Luce dflash server",
@@ -198,6 +200,8 @@ def load_luce() -> tuple[Any, Any, Any]:
                     ref_attr="llama_cpp_ref",
                     repo_build_arg="LLAMA_CPP_REPO",
                     ref_build_arg="LLAMA_CPP_REF",
+                    default_repo="https://github.com/Luce-Org/llama.cpp.git",
+                    default_ref="luce-dflash",
                 ),
                 BuildSource(
                     label="lucebox-hub",
@@ -211,7 +215,6 @@ def load_luce() -> tuple[Any, Any, Any]:
     ),
 )
 class LuceboxServer(ServerBase):
-
     def add_prefill_args(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
             "--prefill-compression",

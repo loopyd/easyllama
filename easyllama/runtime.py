@@ -35,7 +35,7 @@ from .config import (
     resolve_ls_config,
     resolved_api_key,
 )
-from .helpers import ProgressReporter
+from .helpers import ProgressReporter, env_override
 from .logger import get_logger
 from .servers import mode_def as server_mode_def, mode_defs as server_mode_defs
 from .servers.common import hf_file, hf_get, hf_spec
@@ -182,17 +182,17 @@ def _trigger_warmup(
     *,
     headers: dict[str, str],
     timeout: int,
-) -> list[int | None]:
+) -> list[int | str | None]:
     """Start the upstream request without cancelling the model while it loads."""
-    status: list[int | None] = [None]
+    result: list[int | str | None] = [None, None]
 
     def request() -> None:
-        status[0], _ = _http_response(
+        result[:] = _http_response(
             f"{base_url}/upstream/{model_id}/health", headers=headers, timeout=timeout
         )
 
     threading.Thread(target=request, daemon=True).start()
-    return status
+    return result
 
 
 def _prefetch_models(settings: Settings, model_ids: list[str]) -> None:
@@ -231,11 +231,13 @@ def _prefetch_models(settings: Settings, model_ids: list[str]) -> None:
 
 def warmup_models(settings: Settings, model_ids: list[str]) -> int:
     auth = load_auth(settings)
+    if auth.hf_token:
+        os.environ["HF_TOKEN"] = auth.hf_token
     api_key = resolved_api_key(settings, auth)
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     base_url = listen_url(settings)
-    warmup_timeout = int(os.environ.get("LLAMACPP_WARMUP_TIMEOUT", "1800"))
-    warmup_poll_interval = float(os.environ.get("LLAMACPP_WARMUP_POLL_INTERVAL", "2"))
+    warmup_timeout = int(env_override("WARMUP_TIMEOUT", "1800") or "1800")
+    warmup_poll_interval = float(env_override("WARMUP_POLL_INTERVAL", "2") or "2")
     if settings.runtime_mode == RUNTIME_HOST:
         runtime = DockerRuntime(settings)
         runtime.ensure_daemon()
@@ -268,7 +270,7 @@ def warmup_models(settings: Settings, model_ids: list[str]) -> int:
             start_template="Warming model {position}/{count}: {name}",
             update_template=(
                 "Warming model {position}/{count}: {name} "
-                "— cached; {elapsed}s elapsed, state={state}"
+                "— loading; {elapsed}s elapsed, state={state}"
             ),
             finish_template="Warmed model {position}/{count}: {name} in {downloaded}s",
             format_args={
@@ -286,15 +288,13 @@ def warmup_models(settings: Settings, model_ids: list[str]) -> int:
             base_url, model_id, headers=headers, timeout=warmup_timeout
         )
         while time.monotonic() < deadline:
-            item = model_status(
-                settings, model_id, headers=headers, timeout=warmup_poll_interval
-            )
+            item = model_status(settings, model_id, headers=headers, timeout=warmup_poll_interval)
             if item and item.get("state") == "ready":
                 _update_warmup_progress(
                     reporter,
                     started_at=started_at,
                     warmup_timeout=warmup_timeout,
-                    status=trigger_status[0],
+                    status=(trigger_status[0] if isinstance(trigger_status[0], int) else None),
                     item=item,
                 )
                 reporter.finish()
@@ -307,11 +307,18 @@ def warmup_models(settings: Settings, model_ids: list[str]) -> int:
                     raise SystemExit(
                         f"failed to warm model {model_id}: state={state}{detail_suffix}"
                     )
+            trigger_code = trigger_status[0]
+            if item is None and isinstance(trigger_code, int) and trigger_code not in (200, 429):
+                detail = str(trigger_status[1] or "").strip()
+                detail_suffix = f": {detail}" if detail else ""
+                raise SystemExit(
+                    f"failed to warm model {model_id}: HTTP {trigger_code}{detail_suffix}"
+                )
             _update_warmup_progress(
                 reporter,
                 started_at=started_at,
                 warmup_timeout=warmup_timeout,
-                status=trigger_status[0],
+                status=(trigger_status[0] if isinstance(trigger_status[0], int) else None),
                 item=item,
             )
             time.sleep(warmup_poll_interval)
@@ -343,6 +350,16 @@ class DockerRuntime:
     def get_container(self):
         for container in self.client.containers.list(all=True):
             if container.name == self.settings.container_name:
+                return container
+        return None
+
+    def get_legacy_default_container(self):
+        if self.settings.container_name != "easyllama-server-swap" or any(
+            name in os.environ for name in ("EASYLLAMA_CONTAINER_NAME",)
+        ):
+            return None
+        for container in self.client.containers.list(all=True):
+            if container.name == "llamacpp-server-swap":
                 return container
         return None
 
@@ -438,18 +455,25 @@ class DockerRuntime:
         LOGGER.info("build complete: %s", self.settings.image_name)
         return 0
 
-    def remove_container(self) -> None:
-        container = self.get_container()
-        if container is None:
-            LOGGER.warning("container %s does not exist", self.settings.container_name)
-            return
+    def _remove_container(self, container) -> None:
         try:
             if container.status == "running":
                 container.stop(timeout=10)
             container.remove()
         except APIError:
             container.remove(force=True)
-        LOGGER.info("removed container %s", self.settings.container_name)
+        LOGGER.info("removed container %s", container.name)
+
+    def remove_container(self) -> None:
+        container = self.get_container()
+        if container is not None:
+            self._remove_container(container)
+        legacy = self.get_legacy_default_container()
+        if legacy is not None:
+            LOGGER.info("migrating legacy default container to easyllama project naming")
+            self._remove_container(legacy)
+        if container is None and legacy is None:
+            LOGGER.warning("container %s does not exist", self.settings.container_name)
 
     def run_container(self) -> int:
         self.ensure_daemon()
@@ -464,6 +488,11 @@ class DockerRuntime:
                 f"refusing to start {self.settings.container_name}: found "
                 f"{running_count} running containers with same name"
             )
+
+        legacy = self.get_legacy_default_container()
+        if legacy is not None:
+            LOGGER.info("migrating legacy default container to easyllama project naming")
+            self._remove_container(legacy)
 
         container = self.get_container()
         if container is not None and container.status == "running":
@@ -499,10 +528,10 @@ class DockerRuntime:
             volumes["/etc/timezone"] = {"bind": "/etc/timezone", "mode": "ro"}
 
         environment = {
-            "LLAMACPP_RUNTIME_MODE": RUNTIME_CONTAINER,
-            "LLAMACPP_MODE": self.settings.mode,
+            "EASYLLAMA_RUNTIME_MODE": RUNTIME_CONTAINER,
+            "EASYLLAMA_MODE": self.settings.mode,
             "CONTAINER_PORT": str(self.settings.container_port),
-            "LLAMACPP_MMPROJ_ARG": mmproj_argument,
+            "EASYLLAMA_MMPROJ_ARG": mmproj_argument,
             "TZ": self.settings.host_tz,
             "LANG": self.settings.host_lang,
             "LC_ALL": self.settings.host_lc_all,
@@ -511,6 +540,7 @@ class DockerRuntime:
         if auth.hf_token:
             environment["HF_TOKEN"] = auth.hf_token
 
+        backend = server_mode_def(self.settings.mode).backend
         self.client.containers.run(
             self.settings.image_name,
             command=["serve"],
@@ -519,16 +549,18 @@ class DockerRuntime:
             name=self.settings.container_name,
             restart_policy={"Name": "unless-stopped"},
             security_opt=["no-new-privileges"],
-            pids_limit=self.settings.pids_limit,
+            pids_limit=4096 if backend == "vllm" else self.settings.pids_limit,
             runtime="nvidia",
             device_requests=[DeviceRequest(count=-1, capabilities=[["gpu"]])],
-            ports={f"{self.settings.container_port}/tcp": self.settings.host_port},
+            ports={f"{self.settings.container_port}/tcp": ("127.0.0.1", self.settings.host_port)},
             volumes=volumes,
             environment=environment,
             labels={
                 "easyllama.mode": self.settings.mode,
+                "easyllama.backend": backend,
                 "easyllama.image": self.settings.image_name,
             },
+            **({"shm_size": "8g"} if backend == "vllm" else {}),
         )
         LOGGER.info(
             "started %s (%s mode) on http://localhost:%s",
@@ -538,20 +570,30 @@ class DockerRuntime:
         )
         return 0
 
+    def _remove_effective_configs(self) -> None:
+        if not self.settings.runtime_dir.is_dir():
+            return
+        for path in self.settings.runtime_dir.glob("*.effective.yaml"):
+            path.unlink(missing_ok=True)
+
     def stop_container(self) -> int:
         self.ensure_daemon()
         self.remove_container()
+        self._remove_effective_configs()
         return 0
 
     def restart_container(self) -> int:
         self.stop_container()
         return self.run_container()
 
-    def print_logs(self) -> int:
+    def print_logs(self, *, tail: int | None = None) -> int:
         self.ensure_daemon()
         container = self.get_container()
         if container is None:
             raise SystemExit(f"container {self.settings.container_name} does not exist")
+        if tail is not None:
+            print(container.logs(tail=tail).decode("utf-8", errors="replace"), end="")
+            return 0
         try:
             for chunk in container.logs(stream=True, follow=True):
                 print(chunk.decode("utf-8", errors="replace"), end="")
@@ -585,6 +627,7 @@ class DockerRuntime:
         container = self.get_container()
         if container is not None:
             self.remove_container()
+        self._remove_effective_configs()
         image_names = [self.settings.image_name]
         if all_images:
             image_names = [

@@ -1,6 +1,6 @@
 # easy llama(cpp)
 
-Run local `llama.cpp`-style backends behind one `llama-swap` endpoint at `http://127.0.0.1:8080`.
+Run local llama.cpp and vLLM backends behind one `llama-swap` endpoint at `http://127.0.0.1:8080`.
 
 Project goal: one host command surface, one public port, one shared model cache, multiple backend modes.
 
@@ -8,7 +8,7 @@ Project goal: one host command surface, one public port, one shared model cache,
 
 - [easy llama(cpp)](#easy-llamacpp)
   - [Contents](#contents)
-  - [At glance](#at-glance)
+  - [At a glance](#at-a-glance)
   - [Modes](#modes)
   - [System requirements](#system-requirements)
   - [Install](#install)
@@ -20,14 +20,11 @@ Project goal: one host command surface, one public port, one shared model cache,
   - [Common commands](#common-commands)
   - [File map](#file-map)
   - [Environment overrides](#environment-overrides)
-  - [Reader path](#reader-path)
   - [Troubleshooting](#troubleshooting)
   - [Contributing](#contributing)
   - [License](#license)
 
-## At glance
-
-Why reader cares:
+## At a glance
 
 - One entrypoint: `./run.sh`
 - One API base URL: `http://127.0.0.1:8080`
@@ -35,35 +32,28 @@ Why reader cares:
 - One shared mmproj asset directory: `mmproj/`
 - Stable model IDs exposed through `/v1/models`
 - Per-model `concurrencyLimit: 4` in llama-swap configs to cap parallel requests
-- `GGML_CUDA_ENABLE_UNIFIED_MEMORY=1` set in runtime Docker stage for oversubscribed VRAM (RTX 5090)
+- MTP vLLM scheduling capped at 32 sequences per iteration, with full 256K context using FP8 KV cache, dynamic GPU allocation, and an 8 GiB native CPU offload buffer
+- Higher process limit and 8 GiB shared memory for the vLLM runtime
+- `GGML_CUDA_ENABLE_UNIFIED_MEMORY=1` for oversubscribed llama.cpp VRAM on RTX 5090
 - Lazy downloads by default; use warmup for predictable first-request latency
 
 ## Modes
 
-Pick mode by backend behavior, not by install flow. Setup path stays same.
+Choose a mode by backend behavior; the setup flow is the same for all five modes.
 
 - Mode-specific defaults live in the tracked templates under `config/`.
 
 | Mode | Best for | `qwen3-chat` backend | Default chat weights | Extra API surface |
 | --- | --- | --- | --- | --- |
 | `basic` | Plain llama.cpp path | `llama-server-basic` | `unsloth/Qwen3.6-27B-GGUF:Q4_K_M` | none |
-| `turboquant` | Turboquant KV-cache experiments | `llama-server-turboquant` | `HauhauCS/Qwen3.6-27B-Uncensored-HauhauCS-Aggressive:Q5_K_P` | none |
-| `mtp` | MTP experiments (separate llama.cpp fork/config) | `llama-server-mtp` | `unsloth/Qwen3.6-27B-MTP-GGUF:Qwen3.6-27B-UD-Q4_K_XL.gguf` | none |
-| `nvfp` | RTX 5090 Blackwell NVFP4 MoE chat | `llama-server-nvfp` | `LibertAIDAI/Qwen3.6-35B-A3B-NVFP4-GGUF:Qwen3.6-35B-A3B-NVFP4-Q4_K_M.gguf` | none |
+| `turboquant` | Turboquant KV-cache experiments | `llama-server-turboquant` | `unsloth/Qwen3.6-27B-GGUF:UD-Q5_K_XL` | none |
+| `mtp` | vLLM MTP speculative decoding with llama.cpp auxiliary routes | `vllm` via `vllm-wrapper` | `unsloth/Qwen3.8-27B-NVFP4` | none |
 | `spiritbuun` | buun-llama-cpp DFlash experiments | `easyllama server spiritbuun` | `unsloth/Qwen3.6-27B-GGUF:Q5_K_M` + `Ardenzard/Qwen3.6-27B-DFlash-GGUF:Qwen3.6-27B-DFlash-Q5_K_M.gguf` | none |
 | `lucebox` | Luce dflash/pflash experiments | `easyllama server lucebox` | `unsloth/Qwen3.6-27B-GGUF:Q4_K_M` + `KingsonHO/Qwen3.6-27B-DFlash:model.safetensors` | `POST /v1/messages` |
 
-### RTX 5090 NVFP4 profile
+The `mtp` profile serves Qwen3.8-27B NVFP4 through vLLM with native MTP speculation and its full 256K context. On a 32 GiB Blackwell GPU, FP8 KV cache uses an 8 GiB native CPU offload buffer while vLLM dynamically allocates the GPU-resident KV cache. Its hybrid image keeps the embedding route on llama.cpp. llama-swap v250 sleeps the vLLM worker when switching routes and wakes it on demand.
 
-Use `nvfp` for the fastest single-stream Qwen3.6 MoE path on a Blackwell RTX 5090:
-
-```bash
-./run.sh --mode nvfp build
-./run.sh --mode nvfp start
-./run.sh --mode nvfp warmup qwen3-chat
-```
-
-It loads `Qwen3.6-35B-A3B-NVFP4-Q4_K_M`, fully offloads the model, enables Flash Attention, uses a 262,144-token context, and uses `q4_0` for both KV tensors. It intentionally does **not** enable MTP: current llama.cpp MTP draft/verify overhead is slower than ordinary decoding for this fast MoE. Use `mtp` instead to experiment with the separate Qwen3.6-27B MTP profile.
+`--max-num-seqs 32` lets one vLLM scheduler iteration process up to 32 sequences. It is a sequence-concurrency limit, not a 32-token batch size. llama-swap still limits each public model route to four parallel requests.
 
 ## System requirements
 
@@ -72,6 +62,7 @@ It loads `Qwen3.6-35B-A3B-NVFP4-Q4_K_M`, fully offloads the model, enables Flash
 - `docker buildx`
 - NVIDIA drivers and working `nvidia-smi`
 - NVIDIA container runtime in Docker
+- Blackwell GPU for the MTP profile's NVFP4 checkpoint
 - Python `3.11+`
 - `curl`
 - `jq`
@@ -106,7 +97,7 @@ cp auth.json.example auth.json
 
 Set:
 
-- `hf_token` for private or rate-limited Hugging Face pulls
+- `hf_token` for private or rate-limited Hugging Face pulls; build, startup, and host-side warmup prefetch read it from `auth.json` unless `HF_TOKEN` is already set
 - `api_key` for `Authorization: Bearer ...` protection on `/v1/*` routes
 
 ### 2. Copy mode config templates
@@ -116,7 +107,6 @@ cp config/config.basic.yml.example config/config.basic.yml
 cp config/config.turboquant.yml.example config/config.turboquant.yml
 cp config/config.spiritbuun.yml.example config/config.spiritbuun.yml
 cp config/config.mtp.yml.example config/config.mtp.yml
-cp config/config.nvfp.yml.example config/config.nvfp.yml
 cp config/config.lucebox.yml.example config/config.lucebox.yml
 ```
 
@@ -133,18 +123,13 @@ If `config/config.<mode>.yml` does not exist, `run.sh` falls back to the matchin
 ./run.sh --mode <mode> warmup
 ```
 
-Pass model IDs to warm only subset:
+Pass model IDs to warm only a subset:
 
 ```bash
-./run.sh --mode <mode> warmup qwen3-chat qmd-rerank
+./run.sh --mode <mode> warmup qwen3-chat qwen3-embeddings
 ```
 
 With no model arguments, warmup hits every model exposed by `/v1/models`.
-
-`nvfp` configures llama-swap's matrix to allow chat, embeddings, query expansion, and
-reranking workers to remain resident; `qmd-embed` is an alias of the embedding worker,
-not a duplicate 8B process. After every start or restart, run the no-argument warmup once;
-`globalTTL: 0` then prevents idle eviction. This needs enough VRAM for the complete set.
 
 ### 4. Verify runtime
 
@@ -192,13 +177,11 @@ Most-used host commands through `./run.sh`.
 | `config/config.turboquant.yml` | Editable config for `turboquant` |
 | `config/config.spiritbuun.yml` | Editable config for `spiritbuun` |
 | `config/config.mtp.yml` | Editable config for `mtp` |
-| `config/config.nvfp.yml` | Editable config for RTX 5090 NVFP4 |
 | `config/config.lucebox.yml` | Editable config for `lucebox` |
 | `config/config.basic.yml.example` | Tracked `basic` template |
 | `config/config.turboquant.yml.example` | Tracked `turboquant` template |
 | `config/config.spiritbuun.yml.example` | Tracked `spiritbuun` template |
 | `config/config.mtp.yml.example` | Tracked `mtp` template |
-| `config/config.nvfp.yml.example` | Tracked RTX 5090 NVFP4 template |
 | `config/config.lucebox.yml.example` | Tracked `lucebox` template |
 | `models/` | Shared Hugging Face cache |
 | `mmproj/` | Shared mmproj assets |
@@ -209,36 +192,40 @@ Most-used host commands through `./run.sh`.
 
 ## Environment overrides
 
-| Variable | Purpose |
+Use the `EASYLLAMA_*` project prefix. The former environment-variable prefix is no longer supported.
+
+| Preferred variable | Purpose |
 | --- | --- |
-| `LLAMACPP_MODE` | Select `basic`, `turboquant`, `mtp`, `nvfp`, `spiritbuun`, or `lucebox` |
-| `LLAMACPP_LLAMA_CPP_REPO` | Git repo URL for the llama.cpp fork used by the active mode **(unified)** |
-| `LLAMACPP_LLAMA_CPP_REF` | Git branch/tag/commit for the llama.cpp fork **(unified)** |
-| `LLAMACPP_LUCEBOX_HUB_REPO` | Git repo URL for Luce dflash hub (lucebox mode only) |
-| `LLAMACPP_LUCEBOX_HUB_REF` | Git branch/tag/commit for Luce dflash hub |
-| `LLAMACPP_LS_CONFIG_FILE` | Use explicit config file instead of mode lookup |
-| `LLAMACPP_HOST_PORT` | Change published host port |
-| `LLAMACPP_AUTH_FILE` | Use different auth JSON file |
-| `HF_TOKEN` or `LLAMACPP_HF_TOKEN` | Override Hugging Face token |
-| `API_KEY` or `LLAMACPP_API_KEY` | Override local API key |
-| `LLAMACPP_MMPROJ_FILE` | Use local mmproj path, `mmproj/...`, or URL |
-| `LLAMACPP_HF_MMPROJ` | Use HF mmproj asset as `owner/repo/file.gguf` |
-| `LLAMACPP_CMAKE_CUDA_ARCHITECTURES` | Override auto-detected CUDA arch build values |
+| `EASYLLAMA_MODE` | Select `basic`, `turboquant`, `mtp`, `spiritbuun`, or `lucebox` |
+| `EASYLLAMA_IMAGE_NAME` | Override the default `easyllama-local` image repository |
+| `EASYLLAMA_CONTAINER_NAME` | Override the default `easyllama-server-swap` container name |
+| `EASYLLAMA_LLAMA_CPP_REPO` / `EASYLLAMA_LLAMA_CPP_REF` | Override llama.cpp source used by llama.cpp-backed routes |
+| `EASYLLAMA_LUCEBOX_HUB_REPO` / `EASYLLAMA_LUCEBOX_HUB_REF` | Override the Lucebox dflash hub source |
+| `EASYLLAMA_LS_CONFIG_FILE` | Use an explicit llama-swap config file |
+| `EASYLLAMA_HOST_PORT` | Change the published host port |
+| `EASYLLAMA_AUTH_FILE` | Use a different auth JSON file |
+| `HF_TOKEN` or `EASYLLAMA_HF_TOKEN` | Override the Hugging Face token |
+| `API_KEY` or `EASYLLAMA_API_KEY` | Override the local API key |
+| `EASYLLAMA_MMPROJ_FILE` / `EASYLLAMA_HF_MMPROJ` | Select a local, URL, or Hugging Face mmproj asset |
+| `EASYLLAMA_CMAKE_CUDA_ARCHITECTURES` | Override auto-detected CUDA architecture values |
 
-Notes:
+If `auth.json` contains `api_key`, `/v1/*` routes require `Authorization: Bearer <api_key>`.
 
-- **Unified repo vars**: All llama.cpp variants (basic, turboquant, mtp, spiritbuun) now share one `LLAMACPP_LLAMA_CPP_REPO`/`LLAMACPP_LLAMA_CPP_REF` pair. The old mode-specific env vars (`LLAMACPP_MTP_LLAMA_CPP_REPO`, `LLAMACPP_TURBOQUANT_LLAMA_CPP_REPO`, `LLAMACPP_SPIRITBUUN_LLAMA_CPP_REPO`, etc.) are removed. Set the unified pair to override the repo defaults in `pyproject.toml`.
-- Lucebox requires two repos: the main llama.cpp fork plus `LLAMACPP_LUCEBOX_HUB_REPO`/`LLAMACPP_LUCEBOX_HUB_REF` for the dflash hub.
-- If `auth.json` contains `api_key`, `/v1/*` routes require `Authorization: Bearer <api_key>`.
-- `LLAMACPP_LS_CONFIG_FILE` overrides mode-based config selection.
+### Default Docker name migration
 
-## Reader path
+On the first default-name `start`, `restart`, `stop`, or `clean` after upgrading,
+EasyLlama removes the legacy `llamacpp-server-swap` container before continuing.
+Custom container names are never migrated automatically.
 
-New reader:
+To reuse an existing default MTP image without rebuilding, retag it first:
 
-1. Read this file for setup and mode selection.
-2. Read [API.md](API.md) for endpoint usage.
-3. Read [CHANGELOG.md](CHANGELOG.md) for release history and upgrade context.
+```bash
+docker tag llamacpp-local:cuda13-mtp easyllama-local:cuda13-mtp
+./run.sh --mode mtp restart
+```
+
+After confirming the new container is healthy, the old image tag may be removed
+manually. EasyLlama does not delete legacy image tags during migration.
 
 ## Troubleshooting
 
@@ -248,11 +235,11 @@ Fast map from symptom to likely fix.
 | --- | --- | --- |
 | `docker buildx` build fails fast | Buildx missing or not bootstrapped | Install Buildx, then run `docker buildx inspect --bootstrap` |
 | First request is slow | Model download or first load happening lazily | Run `./run.sh warmup ...` first |
-| `POST /v1/messages` fails | Not running `lucebox` mode | Restart with `./run.sh --mode lucebox start` |
+| `POST /v1/messages` fails | The route is only supported by `lucebox` | Restart with `./run.sh --mode lucebox start` |
 | `/v1/models` returns `401` | API key enabled | Send `Authorization: Bearer <api_key>` |
-| Config edit does nothing | Wrong mode file edited or `LLAMACPP_LS_CONFIG_FILE` set | Check active mode and config path |
+| Config edit does nothing | Wrong mode file edited or `EASYLLAMA_LS_CONFIG_FILE` set | Check active mode and config path |
 | Python change seems ignored | Running image stale | Rebuild affected mode, then restart |
-| Port `8080` busy | Another process owns host port | Start with `LLAMACPP_HOST_PORT=8090 ./run.sh start` |
+| Port `8080` busy | Another process owns host port | Start with `EASYLLAMA_HOST_PORT=8090 ./run.sh start` |
 | Private HF downloads fail | No usable HF token | Set `hf_token` in `auth.json` or export `HF_TOKEN` |
 
 ## Contributing

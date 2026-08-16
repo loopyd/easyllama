@@ -15,9 +15,6 @@ macros:
   llama_server_bin: "/app/bin/llama-server-basic"
   kv_ctx_size: "131072"
   pi_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
-  qmd_chat_hf_model: "tobil/qmd-query-expansion-1.7B-gguf:Q8_0"
-  qmd_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
-  qmd_rerank_hf_model: "mradermacher/Qwen3-Reranker-8B-GGUF:Q5_K_M"
   n_predict: "8192"
   temp: "0.6"
   top_k: "20"
@@ -47,7 +44,7 @@ macros:
   web_ui_off: "--no-webui"
   jinja_on: "--jinja"
   no_warmup: "--no-warmup"
-  mmproj_arg: "${env.LLAMACPP_MMPROJ_ARG}"
+  mmproj_arg: "${env.EASYLLAMA_MMPROJ_ARG}"
   chat_template_file: "/chat_template/qwen3.6.jinja"
   chat_template_kwargs: '{\"tokenize\":false,\"add_generation_prompt\":true,\"enable_thinking\":false,\"preserve_thinking\":false}'
   emb_cache_type_k: "f16"
@@ -74,6 +71,7 @@ macros:
 
 models:
   "qwen3-chat":
+    concurrencyLimit: 4
     name: "Pi Qwen3 Chat"
     description: "Primary Luce dflash+pflash chat/messages model with SSE"
     filters:
@@ -111,6 +109,7 @@ models:
       - "HF_TOKEN=${env.HF_TOKEN}"
 
   "qwen3-embeddings":
+    concurrencyLimit: 4
     name: "Pi Qwen3 Embeddings 8B"
     description: "Dense embedding model for vector search, RAG, similarity"
     cmd: |
@@ -130,111 +129,6 @@ models:
       ${kv_unified}
       ${no_mmap}
       --embedding
-      ${no_warmup}
-
-    env:
-      - "HF_TOKEN=${env.HF_TOKEN}"
-
-  "qmd-generate":
-    name: "QMD Query Expansion"
-    description: "Alias for QMD query expansion and OpenAI-compatible completions"
-    filters:
-      setParams:
-        reasoning: "off"
-        chat_template_kwargs:
-          tokenize: false
-          add_generation_prompt: true
-          enable_thinking: false
-          preserve_thinking: false
-    cmd: |
-      ${server_bin}
-      server
-      basic
-      --bin ${llama_server_bin}
-      --port ${PORT}
-      -hf ${qmd_chat_hf_model}
-      --ctx-size ${kv_ctx_size}
-      --n-predict ${n_predict}
-      --temp ${temp}
-      --top-k ${top_k}
-      --top-p ${top_p}
-      --min-p ${min_p}
-      --sampler-seq ${sampler_seq}
-      --repeat-last-n ${repeat_last_n}
-      --repeat-penalty ${repeat_penalty}
-      --presence-penalty ${presence_penalty}
-      --frequency-penalty ${frequency_penalty}
-      --dry-multiplier ${dry_multiplier}
-      --dry-base ${dry_base}
-      --dry-allowed-length ${dry_allowed_length}
-      --dry-penalty-last-n ${dry_penalty_last_n}
-      --batch-size ${batch_size}
-      --ubatch-size ${ubatch_size}
-      --parallel ${parallel}
-      --fit ${fit}
-      --flash-attn ${flash_attn}
-      --cache-type-k ${cache_type_k}
-      --cache-type-v ${cache_type_v}
-      ${kv_unified}
-      ${cache_idle_slots}
-      ${backend_sampling}
-      ${web_ui_off}
-      ${no_warmup}
-      ${no_mmap}
-      --poll ${poll}
-      ${jinja_on}
-      --chat-template-file ${chat_template_file}
-      --chat-template-kwargs ${chat_template_kwargs}
-      --reasoning off
-
-    env:
-      - "HF_TOKEN=${env.HF_TOKEN}"
-
-  "qmd-embed":
-    name: "QMD Embedding"
-    description: "Alias for QMD /v1/embeddings requests"
-    cmd: |
-      ${server_bin}
-      server
-      basic
-      --bin ${llama_server_bin}
-      --port ${PORT}
-      -hf ${qmd_emb_hf_model}
-      --ctx-size ${kv_ctx_size}
-      --batch-size ${batch_size}
-      --ubatch-size ${ubatch_size}
-      --parallel ${parallel}
-      --flash-attn ${flash_attn}
-      --cache-type-k ${emb_cache_type_k}
-      --cache-type-v ${emb_cache_type_v}
-      ${kv_unified}
-      ${no_mmap}
-      --embedding
-      ${no_warmup}
-
-    env:
-      - "HF_TOKEN=${env.HF_TOKEN}"
-
-  "qmd-rerank":
-    name: "Qwen3 Reranker 8B"
-    description: "Cross-encoder reranking model for QMD /v1/rerank requests"
-    cmd: |
-      ${server_bin}
-      server
-      basic
-      --bin ${llama_server_bin}
-      --port ${PORT}
-      -hf ${qmd_rerank_hf_model}
-      --ctx-size ${rerank_ctx_size}
-      --batch-size ${rerank_batch_size}
-      --ubatch-size ${rerank_ubatch_size}
-      --parallel ${parallel}
-      --flash-attn ${flash_attn}
-      --cache-type-k ${emb_cache_type_k}
-      --cache-type-v ${emb_cache_type_v}
-      ${kv_unified}
-      ${no_mmap}
-      --reranking
       ${no_warmup}
 
     env:

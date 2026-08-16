@@ -3,7 +3,7 @@ ARG CUDA_VERSION=13.1.0
 
 # ── Download llama-swap binary (multi-model orchestrator) ───
 FROM ubuntu:24.04 AS ls-download
-ARG LS_VERSION=v208
+ARG LS_VERSION=v250
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /install
@@ -15,6 +15,13 @@ RUN ARCH=$(dpkg --print-architecture) && \
     esac && \
     curl -fSL -o /tmp/ls.tar.gz "https://github.com/mostlygeek/llama-swap/releases/download/${LS_VERSION}/llama-swap_${LS_VERSION#v}_linux_${A}.tar.gz" && \
     tar xzf /tmp/ls.tar.gz -C /install/
+
+# vllm-wrapper is an upstream llama-swap command but is not in release tarballs.
+FROM golang:1.26-bookworm AS vllm-wrapper-build
+ARG LS_VERSION=v250
+RUN git clone --depth 1 --branch "${LS_VERSION}" https://github.com/mostlygeek/llama-swap.git /src/llama-swap \
+    && cd /src/llama-swap \
+    && CGO_ENABLED=0 go build -trimpath -o /install/vllm-wrapper ./cmd/vllm-wrapper
 
 # ── Shared builder base ────────────────────────────────────
 FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu24.04 AS builder-base
@@ -266,7 +273,7 @@ ARG LLAMA_CPP_REPO=https://github.com/ggml-org/llama.cpp.git
 ARG LLAMA_CPP_REF=master
 ARG CMAKE_CUDA_ARCHITECTURES=120
 RUN --mount=type=cache,id=llamacpp-ccache,target=/root/.cache/ccache,sharing=locked \
-    if [ "${BUILD_MODE}" = "mtp" ] || [ "${BUILD_MODE}" = "nvfp" ]; then \
+    if [ "${BUILD_MODE}" = "mtp" ]; then \
         git clone --depth 1 --branch "${LLAMA_CPP_REF}" "${LLAMA_CPP_REPO}" /src/llama.cpp-mtp \
         && cd /src/llama.cpp-mtp \
         && cmake -B build \
@@ -287,18 +294,35 @@ RUN --mount=type=cache,id=llamacpp-ccache,target=/root/.cache/ccache,sharing=loc
         && : > /src/llama.cpp-mtp/convert_hf_to_gguf.py; \
     fi
 
-FROM runtime-base AS runtime-mtp
+# Qwen3.8 support currently ships in vLLM's official qwen38 image. Keep the
+# llama.cpp auxiliary server in this image for embeddings, expansion, and reranking.
+FROM vllm/vllm-openai:qwen38 AS runtime-mtp
+WORKDIR /app
+COPY pyproject.toml /app/
+COPY easyllama/ /app/easyllama/
+COPY run.sh /app/
+COPY scripts/log-exec.sh /app/bin/log-exec
+COPY --from=ls-download /install/llama-swap /app/bin/llama-swap
+COPY --from=vllm-wrapper-build /install/vllm-wrapper /app/bin/vllm-wrapper
 COPY --from=mtp-builder /src/llama.cpp-mtp/build/bin/ /opt/llama.cpp-mtp/bin/
 COPY --from=mtp-builder /src/llama.cpp-mtp/convert_hf_to_gguf.py /opt/llama.cpp/convert_hf_to_gguf.py
 COPY --from=mtp-builder /src/llama.cpp-mtp/gguf-py/ /opt/llama.cpp/gguf-py/
 COPY --from=mtp-builder /src/llama.cpp-mtp/models/templates/ /opt/llama.cpp/models/templates/
-RUN mkdir -p /app/bin \
+RUN python3 -m pip install --no-cache-dir --no-deps /app \
+    && python3 -m pip install --no-cache-dir \
+        colorama docker fastapi huggingface_hub jinja2 protobuf pycurl pyyaml \
+        sentencepiece tqdm uvicorn \
+    && chmod 755 /app/run.sh /app/bin/log-exec \
     && ln -sf /opt/llama.cpp-mtp/bin/llama-server /app/bin/llama-server-mtp
+ENV PYTHONUNBUFFERED=1
+ENV PATH=/usr/local/bin:/app/bin:${PATH}
+ENV GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
 ENV LD_LIBRARY_PATH=/opt/llama.cpp-mtp/bin:/usr/local/cuda/lib64
-# Note: upstream llama.cpp main renamed --spec-type mtp to --spec-type draft-mtp (2026-05-13)
-
-FROM runtime-mtp AS runtime-nvfp
-RUN ln -sf /opt/llama.cpp-mtp/bin/llama-server /app/bin/llama-server-nvfp
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl --fail --silent http://127.0.0.1:8080/health >/dev/null || exit 1
+ENTRYPOINT ["/app/run.sh"]
+CMD ["serve"]
 
 FROM builder-base AS lucebox-builder
 ARG BUILD_MODE=basic

@@ -13,27 +13,39 @@ This project expects respectful, constructive collaboration.
 
 Thanks for helping keep the project usable and easy to maintain.
 
-## Scope
+## Documentation scope
 
 - Update `README.md` when setup, mode selection, or top-level usage changes.
-- Update `API.md` when model IDs, endpoint coverage, or query examples change.
-- Update the matching `config.*.yml.example` file in the same change when config shape or defaults change.
+- Update `API.md` when model IDs, endpoint coverage, or request examples change.
+- Update the matching `config/config.<mode>.yml.example` in the same change when config shape or defaults change.
+- Describe shipped behavior, not ignored local `config/config.<mode>.yml` overrides.
+- Keep the five supported modes and their backends consistent across docs, config, and runtime metadata.
 
-## Useful Checks
+## Validation
 
-Run these from the repository root, inside your virtual environment:
+Run host-side checks from the repository root inside the virtual environment:
 
 ```bash
-bash -n run.sh
-.venv/bin/python -m ruff check easyllama
-.venv/bin/python -m compileall easyllama
-./run.sh help
+.github/skills/easyllama-provider/scripts/validate-code.sh
+.venv/bin/python test_backend_profiles.py
+.venv/bin/python test_runtime_security.py
+.venv/bin/python test_download_progress.py
+.venv/bin/python test_warmup_progress.py
 ```
 
-For runtime-facing changes, rebuild the affected mode image, restart it, then verify at least:
+Validate every changed template before building:
 
-- `GET /health`
-- `GET /v1/models`
+```bash
+.github/skills/easyllama-provider/scripts/validate-config-yaml.sh \
+  config/config.<mode>.yml.example
+```
 
-If API behavior changes, update `API.md` and re-run the relevant query examples.
+For runtime-facing changes, rebuild and warm the affected mode, then run its public endpoint suite:
+
+```bash
+.github/skills/easyllama-provider/scripts/rebuild-and-warmup.sh <mode>
+.github/skills/easyllama-provider/scripts/test-public-endpoints.sh <mode>
+```
+
+At minimum, verify `GET /health` and `GET /v1/models`. If API behavior changes, update `API.md` and exercise the affected request examples.
 
