@@ -1,3 +1,5 @@
+"""Expose the public easyllama package metadata."""
+
 from .main import main
 
 __all__ = ["main"]

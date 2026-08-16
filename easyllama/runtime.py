@@ -1,57 +1,31 @@
+"""Warm configured models and run llama-swap in a container."""
+
 from __future__ import annotations
 
-import json
 import logging
 import os
 from pathlib import Path
 import re
-import shutil
 import signal
 import subprocess
 import threading
 import time
 import types
-from typing import Any
-import urllib.error
-import urllib.request
 
-from docker import from_env
-from docker.errors import APIError, DockerException, ImageNotFound
-from docker.types import DeviceRequest
+from config import LLAMA_SWAP_BIN, RUNTIME_HOST, Config
+from helpers.hf import HuggingFace
+from helpers.http import Http
+from helpers.logger import LOG as APP_LOG
+from helpers.progress import ProgressReporter
 
-from .config import (
-    CHAT_TEMPLATE_DIR_CONTAINER,
-    LLAMA_SWAP_BIN,
-    MMPROJ_DIR_CONTAINER,
-    MODELS_DIR_CONTAINER,
-    RUNTIME_CONTAINER,
-    RUNTIME_HOST,
-    Settings,
-    container_config_path,
-    effective_config_path,
-    listen_url,
-    load_auth,
-    mmproj_arg,
-    resolve_ls_config,
-    resolved_api_key,
-)
-from .helpers import ProgressReporter, env_override
-from .logger import get_logger
-from .servers import mode_def as server_mode_def, mode_defs as server_mode_defs
-from .servers.common import hf_file, hf_get, hf_spec
-
-LOGGER = get_logger(__name__)
-
-
-def _build_summary(settings: Settings, target: str) -> str:
-    return server_mode_def(settings.mode).build_summary(
-        settings,
-        image_name=settings.image_name,
-        target=target,
-    )
+LOGGER = APP_LOG.get(__name__)
 
 
 def _stop_proc(proc: subprocess.Popen) -> None:
+    """Perform the internal stop proc operation.
+
+    Args:
+        proc: The proc."""
     if proc.poll() is not None:
         return
     try:
@@ -65,76 +39,26 @@ def _stop_proc(proc: subprocess.Popen) -> None:
         proc.wait()
 
 
-def compute_cuda_architectures(settings: Settings) -> str:
-    if settings.cmake_cuda_architectures != "auto":
-        return settings.cmake_cuda_architectures
-    result = subprocess.run(
-        ["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        LOGGER.warning(
-            "nvidia-smi not found or failed; using fallback CUDA arch %s",
-            settings.default_cuda_architectures,
-        )
-        return settings.default_cuda_architectures
-    values: set[str] = set()
-    for line in result.stdout.splitlines():
-        match = re.findall(r"\d+", line)
-        if not match:
-            continue
-        major = match[0]
-        minor = match[1][0] if len(match) > 1 and match[1] else "0"
-        values.add(f"{major}{minor}")
-    if not values:
-        LOGGER.warning(
-            "failed to detect compute capability; using fallback CUDA arch %s",
-            settings.default_cuda_architectures,
-        )
-        return settings.default_cuda_architectures
-    return ";".join(sorted(values, key=int))
-
-
-def _http_json(
-    url: str, *, headers: dict[str, str] | None = None, timeout: float | None = None
-) -> dict[str, object]:
-    request = urllib.request.Request(url, headers=headers or {})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        return json.loads(response.read().decode("utf-8"))
-
-
-def _http_response(
-    url: str, *, headers: dict[str, str] | None = None, timeout: float | None = None
-) -> tuple[int, str]:
-    request = urllib.request.Request(url, headers=headers or {})
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            body = response.read().decode("utf-8", errors="replace")
-            return response.status, body
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        return exc.code, body
-    except (TimeoutError, urllib.error.URLError) as exc:
-        return 0, str(exc)
-
-
-def _http_status(url: str, *, headers: dict[str, str] | None = None) -> int:
-    status, _ = _http_response(url, headers=headers)
-    return status
-
-
 def model_status(
-    settings: Settings,
+    settings: Config,
     model_id: str,
     *,
     headers: dict[str, str],
     timeout: float | None = None,
 ) -> dict[str, object] | None:
+    """Return a model entry from llama-swap running state.
+
+    Args:
+        settings: The settings.
+        model_id: The model id.
+        headers: The headers.
+        timeout: The timeout.
+
+    Returns:
+        dict[str, object] | None: The model status result."""
     try:
-        payload = _http_json(f"{listen_url(settings)}/running", headers=headers, timeout=timeout)
-    except (TimeoutError, urllib.error.URLError):
+        payload = Http(settings.listen_url(), headers=headers, timeout=timeout).at("running").json()
+    except OSError:
         return None
     running = payload.get("running", [])
     if not isinstance(running, list):
@@ -147,18 +71,6 @@ def model_status(
     return None
 
 
-def model_ready(settings: Settings, model_id: str, *, headers: dict[str, str]) -> bool:
-    item = model_status(settings, model_id, headers=headers)
-    return bool(item and item.get("state") == "ready")
-
-
-def _warmup_state(item: dict[str, object] | None) -> str:
-    if not item:
-        return "loading"
-    state = str(item.get("state") or "unknown").strip().lower()
-    return state or "unknown"
-
-
 def _update_warmup_progress(
     reporter: ProgressReporter,
     *,
@@ -167,9 +79,18 @@ def _update_warmup_progress(
     status: int | None,
     item: dict[str, object] | None,
 ) -> None:
+    """Perform the internal update warmup progress operation.
+
+    Args:
+        reporter: The reporter.
+        started_at: The started at.
+        warmup_timeout: The warmup timeout.
+        status: The status.
+        item: The item."""
     elapsed = min(int(time.monotonic() - started_at), warmup_timeout)
     reporter.format_args["http_status"] = status if status is not None else "?"
-    reporter.format_args["state"] = _warmup_state(item)
+    state = str(item.get("state") or "unknown").strip().lower() if item else "loading"
+    reporter.format_args["state"] = state or "unknown"
     reporter.format_args["elapsed"] = elapsed
     delta = elapsed - int(reporter.downloaded)
     if delta > 0:
@@ -183,23 +104,39 @@ def _trigger_warmup(
     headers: dict[str, str],
     timeout: int,
 ) -> list[int | str | None]:
-    """Start the upstream request without cancelling the model while it loads."""
+    """Perform the internal trigger warmup operation.
+
+    Args:
+        base_url: The base url.
+        model_id: The model id.
+        headers: The headers.
+        timeout: The timeout.
+
+    Returns:
+        list[int | str | None]: The trigger warmup result."""
     result: list[int | str | None] = [None, None]
 
     def request() -> None:
-        result[:] = _http_response(
-            f"{base_url}/upstream/{model_id}/health", headers=headers, timeout=timeout
+        """Build a standard-library request for the bound URL."""
+        result[:] = (
+            Http(base_url, headers=headers, timeout=timeout)
+            .at(f"upstream/{model_id}/health")
+            .response()
         )
 
     threading.Thread(target=request, daemon=True).start()
     return result
 
 
-def _prefetch_models(settings: Settings, model_ids: list[str]) -> None:
-    """Download warmup GGUFs on the host so easyllama owns byte progress."""
+def _prefetch_models(settings: Config, model_ids: list[str]) -> None:
+    """Perform the internal prefetch models operation.
+
+    Args:
+        settings: The settings.
+        model_ids: The model ids."""
     import yaml
 
-    config = yaml.safe_load(resolve_ls_config(settings).read_text(encoding="utf-8")) or {}
+    config = yaml.safe_load(settings.resolve_ls_config().read_text(encoding="utf-8")) or {}
     macros = config.get("macros", {})
     models = config.get("models", {})
     total_models = len(model_ids)
@@ -218,36 +155,50 @@ def _prefetch_models(settings: Settings, model_ids: list[str]) -> None:
             if expanded == spec:
                 break
             spec = expanded
-        repo, selector = hf_spec(spec)
+        repo, selector = HuggingFace.parse_spec(spec)
         if repo and selector:
-            hf_get(
-                repo,
-                hf_file(repo, selector, model_id, suffixes=(".gguf",)),
-                model_id,
+            hf = HuggingFace(model_id, repo)
+            hf.get(
+                hf.file(selector, suffixes=(".gguf",)),
                 cache_dir=settings.models_dir,
                 warmup=f"Warming model {position}/{total_models}: {model_id}",
             )
 
 
-def warmup_models(settings: Settings, model_ids: list[str]) -> int:
-    auth = load_auth(settings)
+def warmup_models(settings: Config, model_ids: list[str]) -> int:
+    """Load selected models and wait until each is ready.
+
+    Args:
+        settings: The settings.
+        model_ids: The model ids.
+
+    Returns:
+        int: The warmup models result.
+
+    Raises:
+        SystemExit: If the warmup models operation cannot be completed."""
+    auth = settings.load_auth()
     if auth.hf_token:
         os.environ["HF_TOKEN"] = auth.hf_token
-    api_key = resolved_api_key(settings, auth)
+    api_key = settings.resolved_api_key(auth)
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-    base_url = listen_url(settings)
-    warmup_timeout = int(env_override("WARMUP_TIMEOUT", "1800") or "1800")
-    warmup_poll_interval = float(env_override("WARMUP_POLL_INTERVAL", "2") or "2")
+    base_url = settings.listen_url()
+    warmup_timeout = int(settings.env("WARMUP_TIMEOUT", "1800") or "1800")
+    warmup_poll_interval = float(settings.env("WARMUP_POLL_INTERVAL", "2") or "2")
     if settings.runtime_mode == RUNTIME_HOST:
+        from helpers.docker import DockerRuntime
+
         runtime = DockerRuntime(settings)
         runtime.ensure_daemon()
         if not runtime.is_running():
             raise SystemExit(f"container {settings.container_name} is not running; start it first")
-    if _http_status(f"{base_url}/health") >= 400:
+    http = Http(base_url, headers=headers)
+    health_status, _ = http.at("health").response()
+    if health_status >= 400:
         raise SystemExit(f"llama-swap is not reachable at {base_url}")
     selected_ids = list(model_ids)
     if not selected_ids:
-        payload = _http_json(f"{base_url}/v1/models", headers=headers)
+        payload = http.at("v1/models").json()
         data = payload.get("data", [])
         if isinstance(data, list):
             selected_ids = [
@@ -330,321 +281,18 @@ def warmup_models(settings: Settings, model_ids: list[str]) -> int:
     return 0
 
 
-class DockerRuntime:
-    def __init__(self, settings: Settings) -> None:
-        self.settings = settings
-        self.client: Any = from_env()
-        self.api: Any = self.client.api
+def serve(settings: Config) -> int:
+    """Run llama-swap directly in the container.
 
-    def ensure_daemon(self) -> None:
-        try:
-            self.client.ping()
-        except DockerException as exc:
-            raise SystemExit("docker daemon is not reachable (start docker and retry)") from exc
+    Args:
+        settings: The settings.
 
-    def ensure_nvidia_runtime(self) -> None:
-        runtimes = self.client.info().get("Runtimes", {})
-        if "nvidia" not in runtimes:
-            raise SystemExit("nvidia container runtime is not available in docker")
+    Returns:
+        int: The serve result.
 
-    def get_container(self):
-        for container in self.client.containers.list(all=True):
-            if container.name == self.settings.container_name:
-                return container
-        return None
-
-    def get_legacy_default_container(self):
-        if self.settings.container_name != "easyllama-server-swap" or any(
-            name in os.environ for name in ("EASYLLAMA_CONTAINER_NAME",)
-        ):
-            return None
-        for container in self.client.containers.list(all=True):
-            if container.name == "llamacpp-server-swap":
-                return container
-        return None
-
-    def get_running_container_count(self) -> int:
-        return sum(
-            1
-            for container in self.client.containers.list()
-            if container.name == self.settings.container_name
-        )
-
-    def is_running(self) -> bool:
-        container = self.get_container()
-        return bool(container and container.status == "running")
-
-    def image_exists(self, image_name: str | None = None) -> bool:
-        try:
-            self.client.images.get(image_name or self.settings.image_name)
-        except ImageNotFound:
-            return False
-        return True
-
-    def _build_cmd(self, target: str, build_args: dict[str, str]) -> list[str]:
-        docker_bin = shutil.which("docker")
-        if docker_bin is None:
-            raise SystemExit("docker CLI is required for image builds")
-        cmd = [
-            docker_bin,
-            "buildx",
-            "build",
-            "--load",
-            "--progress=plain",
-            "--pull",
-            "--tag",
-            self.settings.image_name,
-            "--target",
-            target,
-            "--file",
-            str(self.settings.root_dir / "Dockerfile"),
-        ]
-        for key, value in build_args.items():
-            cmd.extend(("--build-arg", f"{key}={value}"))
-        cmd.append(str(self.settings.root_dir))
-        return cmd
-
-    def _ensure_buildx(self) -> None:
-        docker_bin = shutil.which("docker")
-        if docker_bin is None:
-            raise SystemExit("docker CLI is required for image builds")
-        result = subprocess.run(
-            [docker_bin, "buildx", "inspect", "--bootstrap"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            detail = (result.stderr or result.stdout).strip()
-            message = "docker buildx with BuildKit is required for image builds"
-            if detail:
-                message = f"{message}: {detail}"
-            raise SystemExit(message)
-
-    def build_image(self) -> int:
-        self.ensure_daemon()
-        self._ensure_buildx()
-        mode_metadata = server_mode_def(self.settings.mode)
-        target = mode_metadata.docker_target
-        build_args = {
-            "BUILD_MODE": self.settings.mode,
-            "DEBIAN_FRONTEND": "noninteractive",
-            "HOST_TZ": self.settings.host_tz,
-            "HOST_LANG": self.settings.host_lang,
-            "HOST_LC_ALL": self.settings.host_lc_all,
-            "CMAKE_CUDA_ARCHITECTURES": compute_cuda_architectures(self.settings),
-        }
-        build_args.update(mode_metadata.build_args(self.settings))
-        LOGGER.info(_build_summary(self.settings, target))
-        proc = subprocess.Popen(
-            self._build_cmd(target, build_args),
-            cwd=str(self.settings.root_dir),
-            env=os.environ.copy(),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
-        assert proc.stdout is not None
-        for line in proc.stdout:
-            message = line.rstrip()
-            if message:
-                LOGGER.debug(message)
-        if proc.wait() != 0:
-            raise SystemExit(f"docker buildx build failed for {self.settings.image_name}")
-        LOGGER.info("build complete: %s", self.settings.image_name)
-        return 0
-
-    def _remove_container(self, container) -> None:
-        try:
-            if container.status == "running":
-                container.stop(timeout=10)
-            container.remove()
-        except APIError:
-            container.remove(force=True)
-        LOGGER.info("removed container %s", container.name)
-
-    def remove_container(self) -> None:
-        container = self.get_container()
-        if container is not None:
-            self._remove_container(container)
-        legacy = self.get_legacy_default_container()
-        if legacy is not None:
-            LOGGER.info("migrating legacy default container to easyllama project naming")
-            self._remove_container(legacy)
-        if container is None and legacy is None:
-            LOGGER.warning("container %s does not exist", self.settings.container_name)
-
-    def run_container(self) -> int:
-        self.ensure_daemon()
-        self.ensure_nvidia_runtime()
-        auth = load_auth(self.settings)
-        self.settings.models_dir.mkdir(parents=True, exist_ok=True)
-        self.settings.mmproj_dir.mkdir(parents=True, exist_ok=True)
-
-        running_count = self.get_running_container_count()
-        if running_count > 1:
-            raise SystemExit(
-                f"refusing to start {self.settings.container_name}: found "
-                f"{running_count} running containers with same name"
-            )
-
-        legacy = self.get_legacy_default_container()
-        if legacy is not None:
-            LOGGER.info("migrating legacy default container to easyllama project naming")
-            self._remove_container(legacy)
-
-        container = self.get_container()
-        if container is not None and container.status == "running":
-            running_mode = container.labels.get("easyllama.mode", "unknown")
-            LOGGER.warning(
-                "container %s is already running in %s mode; use restart to replace it",
-                self.settings.container_name,
-                running_mode,
-            )
-            return 0
-        if container is not None:
-            self.remove_container()
-
-        if not self.image_exists():
-            LOGGER.info("image %s is missing; building it first", self.settings.image_name)
-            self.build_image()
-
-        config_path, container_config_path_value = effective_config_path(self.settings, auth)
-        mmproj_argument = mmproj_arg(self.settings, auth)
-        volumes = {
-            str(self.settings.models_dir): {"bind": MODELS_DIR_CONTAINER, "mode": "rw"},
-            str(self.settings.mmproj_dir): {"bind": MMPROJ_DIR_CONTAINER, "mode": "rw"},
-            str(config_path): {"bind": container_config_path_value, "mode": "ro"},
-        }
-        if self.settings.chat_template_dir.is_dir():
-            volumes[str(self.settings.chat_template_dir)] = {
-                "bind": CHAT_TEMPLATE_DIR_CONTAINER,
-                "mode": "ro",
-            }
-        if Path("/etc/localtime").is_file():
-            volumes["/etc/localtime"] = {"bind": "/etc/localtime", "mode": "ro"}
-        if Path("/etc/timezone").is_file():
-            volumes["/etc/timezone"] = {"bind": "/etc/timezone", "mode": "ro"}
-
-        environment = {
-            "EASYLLAMA_RUNTIME_MODE": RUNTIME_CONTAINER,
-            "EASYLLAMA_MODE": self.settings.mode,
-            "CONTAINER_PORT": str(self.settings.container_port),
-            "EASYLLAMA_MMPROJ_ARG": mmproj_argument,
-            "TZ": self.settings.host_tz,
-            "LANG": self.settings.host_lang,
-            "LC_ALL": self.settings.host_lc_all,
-            "EASYLLAMA_ROOT": "/app",
-        }
-        if auth.hf_token:
-            environment["HF_TOKEN"] = auth.hf_token
-
-        backend = server_mode_def(self.settings.mode).backend
-        self.client.containers.run(
-            self.settings.image_name,
-            command=["serve"],
-            detach=True,
-            init=True,
-            name=self.settings.container_name,
-            restart_policy={"Name": "unless-stopped"},
-            security_opt=["no-new-privileges"],
-            pids_limit=4096 if backend == "vllm" else self.settings.pids_limit,
-            runtime="nvidia",
-            device_requests=[DeviceRequest(count=-1, capabilities=[["gpu"]])],
-            ports={f"{self.settings.container_port}/tcp": ("127.0.0.1", self.settings.host_port)},
-            volumes=volumes,
-            environment=environment,
-            labels={
-                "easyllama.mode": self.settings.mode,
-                "easyllama.backend": backend,
-                "easyllama.image": self.settings.image_name,
-            },
-            **({"shm_size": "8g"} if backend == "vllm" else {}),
-        )
-        LOGGER.info(
-            "started %s (%s mode) on http://localhost:%s",
-            self.settings.container_name,
-            self.settings.mode,
-            self.settings.host_port,
-        )
-        return 0
-
-    def _remove_effective_configs(self) -> None:
-        if not self.settings.runtime_dir.is_dir():
-            return
-        for path in self.settings.runtime_dir.glob("*.effective.yaml"):
-            path.unlink(missing_ok=True)
-
-    def stop_container(self) -> int:
-        self.ensure_daemon()
-        self.remove_container()
-        self._remove_effective_configs()
-        return 0
-
-    def restart_container(self) -> int:
-        self.stop_container()
-        return self.run_container()
-
-    def print_logs(self, *, tail: int | None = None) -> int:
-        self.ensure_daemon()
-        container = self.get_container()
-        if container is None:
-            raise SystemExit(f"container {self.settings.container_name} does not exist")
-        if tail is not None:
-            print(container.logs(tail=tail).decode("utf-8", errors="replace"), end="")
-            return 0
-        try:
-            for chunk in container.logs(stream=True, follow=True):
-                print(chunk.decode("utf-8", errors="replace"), end="")
-        except KeyboardInterrupt:
-            LOGGER.info("log follow interrupted")
-            return 0
-        return 0
-
-    def status(self) -> int:
-        self.ensure_daemon()
-        container = self.get_container()
-        if container is None:
-            LOGGER.info("container %s is not present", self.settings.container_name)
-        else:
-            image = container.image
-            image_name = image.tags[0] if image and image.tags else "<untagged>"
-            LOGGER.info(
-                "container %s status=%s image=%s", container.name, container.status, image_name
-            )
-        available_images = []
-        for mode_metadata in server_mode_defs():
-            mode_settings = self.settings.with_mode(mode_metadata.mode)
-            if self.image_exists(mode_settings.image_name):
-                available_images.append(mode_settings.image_name)
-        if available_images:
-            LOGGER.info("available mode images: %s", ", ".join(available_images))
-        return 0
-
-    def clean(self, *, all_images: bool = False) -> int:
-        self.ensure_daemon()
-        container = self.get_container()
-        if container is not None:
-            self.remove_container()
-        self._remove_effective_configs()
-        image_names = [self.settings.image_name]
-        if all_images:
-            image_names = [
-                self.settings.with_mode(mode_metadata.mode).image_name
-                for mode_metadata in server_mode_defs()
-            ]
-        for image_name in image_names:
-            try:
-                self.client.images.remove(image_name, force=True)
-                LOGGER.info("removed image %s", image_name)
-            except ImageNotFound:
-                LOGGER.warning("image %s does not exist", image_name)
-        return 0
-
-
-def serve(settings: Settings) -> int:
-    config_path = container_config_path(settings)
+    Raises:
+        SystemExit: If the serve operation cannot be completed."""
+    config_path = settings.container_config_path()
     llama_swap_bin = Path(LLAMA_SWAP_BIN)
     if not llama_swap_bin.is_file():
         raise SystemExit(f"llama-swap binary not found at {llama_swap_bin}")
@@ -667,6 +315,11 @@ def serve(settings: Settings) -> int:
     saved: dict[signal.Signals, object] = {}
 
     def handle(signum: int, _frame: types.FrameType | None) -> None:
+        """Perform the handle operation.
+
+        Args:
+            signum: The signum.
+            _frame: The frame."""
         LOGGER.info("received signal %s, stopping llama-swap", signum)
         _stop_proc(proc)
 

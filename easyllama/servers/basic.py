@@ -1,10 +1,12 @@
+"""Implement the basic llama.cpp server mode."""
+
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 
-from .common import ensure_gguf, hf_args, hf_file, hf_get, hf_snap
-from .server_base import BuildSource, RuntimeModeMetadata, ServerBase, Spec, server_metadata
+from ..helpers.model import Model
+from .base import BuildSource, RuntimeModeMetadata, ServerBase, Spec, server_metadata
 
 DEFAULT_BIN = Path("/app/bin/llama-server-basic")
 
@@ -62,7 +64,13 @@ DEFAULT_BIN = Path("/app/bin/llama-server-basic")
     ),
 )
 class BasicServer(ServerBase):
+    """Represent BasicServer state and behavior."""
+
     def add_args(self, parser: argparse.ArgumentParser) -> None:
+        """Add mode-specific command-line arguments.
+
+        Args:
+            parser: The parser."""
         parser.add_argument(
             "--bin", type=Path, default=DEFAULT_BIN, help="llama-server binary to exec"
         )
@@ -99,23 +107,37 @@ class BasicServer(ServerBase):
         )
 
     def model_path(self, args: argparse.Namespace) -> Path:
-        repo, file = hf_args(label="model", spec=args.hf, repo=args.hf_repo, file=args.hf_file)
-        if repo:
-            file = hf_file(
-                repo, file, "model", suffixes=(".gguf", ".safetensors", ".safetensors.index.json")
-            )
-            if file.endswith(".gguf"):
-                return hf_get(repo, file, "model")
-            snap = hf_snap(repo, "model")
-            src = snap / file
-            if not src.exists():
-                raise SystemExit(f"model source {file} not found in {repo}")
-            return ensure_gguf(src, label="model", repo=repo, outtype=args.gguf_outtype)
-        if args.model is None:
-            raise SystemExit("model path or HF selector is required")
-        return ensure_gguf(args.model, label="model", outtype=args.gguf_outtype)
+        """Perform the model path operation.
+
+        Args:
+            args: The args.
+
+        Returns:
+            Path: The model path result.
+
+        Raises:
+            SystemExit: If the model path operation cannot be completed."""
+        return Model.from_args(
+            "model",
+            local=args.model,
+            spec=args.hf,
+            repo=args.hf_repo,
+            file=args.hf_file,
+            outtype=args.gguf_outtype,
+        ).resolve()
 
     def build(self, args: argparse.Namespace, extra: list[str]) -> Spec:
+        """Build the process specification for parsed server arguments.
+
+        Args:
+            args: The args.
+            extra: The extra.
+
+        Returns:
+            Spec: The build result.
+
+        Raises:
+            SystemExit: If the build operation cannot be completed."""
         if not args.bin.is_file():
             raise SystemExit(f"binary not found at {args.bin}")
         model = self.model_path(args)
@@ -126,8 +148,19 @@ class BasicServer(ServerBase):
         )
 
     def warmup(self, spec: Spec) -> None:
+        """Log resolved server assets before startup.
+
+        Args:
+            spec: The spec."""
         self.log.info("Launching llama-server via %s", spec.data["bin"])
         self.log.info("Model resolved to %s", spec.data["model"])
 
     def run(self, spec: Spec) -> int:
+        """Run a built server process specification.
+
+        Args:
+            spec: The spec.
+
+        Returns:
+            int: The run result."""
         return self.run_proc(spec.cmd, env=spec.env)

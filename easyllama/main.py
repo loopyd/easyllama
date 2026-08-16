@@ -1,7 +1,7 @@
+"""Expose the installed easyllama command entry point."""
+
 from __future__ import annotations
 
-from .cli import main as cli_main
+from .cli import main
 
-
-def main(argv: list[str] | None = None) -> int:
-    return cli_main(argv)
+__all__ = ["main"]

@@ -1,10 +1,12 @@
+"""Implement the Spiritbuun speculative-decoding server mode."""
+
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 
-from .common import ensure_gguf, hf_args, hf_file, hf_get, hf_snap
-from .server_base import BuildSource, RuntimeModeMetadata, ServerBase, Spec, server_metadata
+from ..helpers.model import Model
+from .base import BuildSource, RuntimeModeMetadata, ServerBase, Spec, server_metadata
 
 DEFAULT_BIN = Path("/app/bin/llama-server-spiritbuun")
 
@@ -31,7 +33,13 @@ DEFAULT_BIN = Path("/app/bin/llama-server-spiritbuun")
     ),
 )
 class SpiritbuunServer(ServerBase):
+    """Represent SpiritbuunServer state and behavior."""
+
     def add_args(self, parser: argparse.ArgumentParser) -> None:
+        """Add mode-specific command-line arguments.
+
+        Args:
+            parser: The parser."""
         parser.add_argument(
             "--bin", type=Path, default=DEFAULT_BIN, help="Spiritbuun llama-server binary to exec"
         )
@@ -102,27 +110,42 @@ class SpiritbuunServer(ServerBase):
         file: str | None,
         outtype: str,
     ) -> Path:
-        repo, file = hf_args(label=label, spec=spec, repo=repo, file=file)
-        if repo:
-            file = hf_file(
-                repo,
-                file,
-                label,
-                suffixes=(".gguf", ".safetensors", ".safetensors.index.json"),
-            )
-            if file.endswith(".gguf"):
-                return hf_get(repo, file, label)
-            snap = hf_snap(repo, label)
-            src = snap / file
-            if not src.exists():
-                raise SystemExit(f"{label} source {file} not found in {repo}")
-            return ensure_gguf(src, label=label, repo=repo, outtype=outtype)
+        """Perform the internal resolve model operation.
 
-        if local is None:
-            raise SystemExit(f"{label} model path or HF selector is required")
-        return ensure_gguf(local, label=label, outtype=outtype)
+        Args:
+            label: The label.
+            local: The local.
+            spec: The spec.
+            repo: The repo.
+            file: The file.
+            outtype: The outtype.
+
+        Returns:
+            Path: The resolve model result.
+
+        Raises:
+            SystemExit: If the resolve model operation cannot be completed."""
+        return Model.from_args(
+            label,
+            local=local,
+            spec=spec,
+            repo=repo,
+            file=file,
+            outtype=outtype,
+        ).resolve()
 
     def build(self, args: argparse.Namespace, extra: list[str]) -> Spec:
+        """Build the process specification for parsed server arguments.
+
+        Args:
+            args: The args.
+            extra: The extra.
+
+        Returns:
+            Spec: The build result.
+
+        Raises:
+            SystemExit: If the build operation cannot be completed."""
         if not args.bin.is_file():
             raise SystemExit(f"binary not found at {args.bin}")
 
@@ -163,9 +186,20 @@ class SpiritbuunServer(ServerBase):
         )
 
     def warmup(self, spec: Spec) -> None:
+        """Log resolved server assets before startup.
+
+        Args:
+            spec: The spec."""
         self.log.info("Launching Spiritbuun llama-server via %s", spec.data["bin"])
         self.log.info("Target model resolved to %s", spec.data["target"])
         self.log.info("Draft model resolved to %s", spec.data["draft"])
 
     def run(self, spec: Spec) -> int:
+        """Run a built server process specification.
+
+        Args:
+            spec: The spec.
+
+        Returns:
+            int: The run result."""
         return self.run_proc(spec.cmd, env=spec.env)

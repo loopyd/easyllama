@@ -21,6 +21,16 @@ FROM golang:1.26-bookworm AS vllm-wrapper-build
 ARG LS_VERSION=v250
 RUN git clone --depth 1 --branch "${LS_VERSION}" https://github.com/mostlygeek/llama-swap.git /src/llama-swap \
     && cd /src/llama-swap \
+    # Keep the daemon outside llama-swap's proxy process group so it survives proxy unload.
+    && sed -i '/cmd := exec.Command(startArgs\[0\], startArgs\[1:\]...)/a\    cmd.SysProcAttr = \&syscall.SysProcAttr{Setsid: true}' cmd/vllm-wrapper/main.go \
+    && grep -q 'SysProcAttr{Setsid: true}' cmd/vllm-wrapper/main.go \
+    # Health polling expects connection refusals while models load; keep the 502 but suppress Go's noisy dial log.
+    && sed -i '/\/\/ httputil.ReverseProxy panics/i\	reverseProxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, _ error) { http.Error(w, "upstream unavailable", http.StatusBadGateway) }\n' internal/process/process_command.go \
+    && grep -q 'upstream unavailable' internal/process/process_command.go \
+    # Preload only needs readiness; vLLM intentionally returns 404 at GET /.
+    && sed -i 's|http.MethodGet, "/", nil|http.MethodGet, "/health", nil|' internal/server/api.go \
+    && grep -q 'http.MethodGet, "/health", nil' internal/server/api.go \
+    && CGO_ENABLED=0 go build -trimpath -o /install/llama-swap . \
     && CGO_ENABLED=0 go build -trimpath -o /install/vllm-wrapper ./cmd/vllm-wrapper
 
 # ── Shared builder base ────────────────────────────────────
@@ -148,7 +158,7 @@ RUN --mount=type=cache,id=llamacpp-pip-cache,target=/root/.cache/pip,sharing=loc
 ENV PYTHONUNBUFFERED=1
 ENV PATH=/opt/venv/bin:${PATH}
 ENV GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
-COPY --from=ls-download /install/llama-swap /app/bin/llama-swap
+COPY --from=vllm-wrapper-build /install/llama-swap /app/bin/llama-swap
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl --fail --silent http://127.0.0.1:8080/health >/dev/null || exit 1
@@ -302,7 +312,7 @@ COPY pyproject.toml /app/
 COPY easyllama/ /app/easyllama/
 COPY run.sh /app/
 COPY scripts/log-exec.sh /app/bin/log-exec
-COPY --from=ls-download /install/llama-swap /app/bin/llama-swap
+COPY --from=vllm-wrapper-build /install/llama-swap /app/bin/llama-swap
 COPY --from=vllm-wrapper-build /install/vllm-wrapper /app/bin/vllm-wrapper
 COPY --from=mtp-builder /src/llama.cpp-mtp/build/bin/ /opt/llama.cpp-mtp/bin/
 COPY --from=mtp-builder /src/llama.cpp-mtp/convert_hf_to_gguf.py /opt/llama.cpp/convert_hf_to_gguf.py

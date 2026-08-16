@@ -1,3 +1,5 @@
+"""Implement the Lucebox speculative-decoding server mode."""
+
 from __future__ import annotations
 
 import argparse
@@ -9,8 +11,8 @@ from pathlib import Path
 import sys
 from typing import Any, cast
 
-from .common import ensure_gguf, hf_args, hf_file, hf_get, hf_snap, pick_asset
-from .server_base import BuildSource, RuntimeModeMetadata, ServerBase, Spec, server_metadata
+from ..helpers.model import Model
+from .base import BuildSource, RuntimeModeMetadata, ServerBase, Spec, server_metadata
 
 LUCE_SCRIPTS = Path("/opt/lucebox/dflash/scripts")
 FALLBACK_MODEL = "qwen3-chat"
@@ -23,6 +25,13 @@ FALLBACK_THINKING_BUDGET_EXTRA = 0
 
 
 def patch_luce_finish_reason(luce: Any) -> None:
+    """Perform the patch luce finish reason operation.
+
+    Args:
+        luce: The luce.
+
+    Raises:
+        RuntimeError: If the patch luce finish reason operation cannot be completed."""
     if getattr(luce, "_easyllama_finish_reason_patched", False):
         return
 
@@ -74,15 +83,38 @@ def patch_luce_finish_reason(luce: Any) -> None:
 
 
 class ChatRequestBudgetMiddleware:
+    """Represent ChatRequestBudgetMiddleware state and behavior.
+
+    Attributes:
+        app: The app.
+        extra_tokens: The extra tokens."""
+
     def __init__(self, app: Any, extra_tokens: int) -> None:
+        """Initialize the instance.
+
+        Args:
+            app: The app.
+            extra_tokens: The extra tokens."""
         self.app = app
         self.extra_tokens = extra_tokens
 
     @staticmethod
     def _wrap_receive(body: bytes, original_receive: Any) -> Any:
+        """Perform the internal wrap receive operation.
+
+        Args:
+            body: The body.
+            original_receive: The original receive.
+
+        Returns:
+            Any: The wrap receive result."""
         sent = False
 
         async def receive() -> dict[str, Any]:
+            """Perform the receive operation.
+
+            Returns:
+                dict[str, Any]: The receive result."""
             nonlocal sent
             if not sent:
                 sent = True
@@ -92,6 +124,12 @@ class ChatRequestBudgetMiddleware:
         return receive
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        """Process an ASGI request.
+
+        Args:
+            scope: The scope.
+            receive: The receive.
+            send: The send."""
         if (
             scope.get("type") != "http"
             or scope.get("method") != "POST"
@@ -167,6 +205,11 @@ class ChatRequestBudgetMiddleware:
 
 
 def install_chat_request_budget_middleware(app: Any, extra_tokens: int) -> None:
+    """Perform the install chat request budget middleware operation.
+
+    Args:
+        app: The app.
+        extra_tokens: The extra tokens."""
     if getattr(app, "_easyllama_chat_request_budget_middleware", False):
         return
     app.add_middleware(ChatRequestBudgetMiddleware, extra_tokens=extra_tokens)
@@ -175,6 +218,10 @@ def install_chat_request_budget_middleware(app: Any, extra_tokens: int) -> None:
 
 @lru_cache(maxsize=1)
 def load_luce() -> tuple[Any, Any, Any]:
+    """Perform the load luce operation.
+
+    Returns:
+        tuple[Any, Any, Any]: The load luce result."""
     if str(LUCE_SCRIPTS) not in sys.path:
         sys.path.insert(0, str(LUCE_SCRIPTS))
 
@@ -215,7 +262,13 @@ def load_luce() -> tuple[Any, Any, Any]:
     ),
 )
 class LuceboxServer(ServerBase):
+    """Represent LuceboxServer state and behavior."""
+
     def add_prefill_args(self, parser: argparse.ArgumentParser) -> None:
+        """Perform the add prefill args operation.
+
+        Args:
+            parser: The parser."""
         parser.add_argument(
             "--prefill-compression",
             choices=["off", "auto"],
@@ -247,6 +300,10 @@ class LuceboxServer(ServerBase):
         )
 
     def add_args(self, parser: argparse.ArgumentParser) -> None:
+        """Add mode-specific command-line arguments.
+
+        Args:
+            parser: The parser."""
         try:
             luce, _, _ = load_luce()
         except ModuleNotFoundError:
@@ -370,34 +427,34 @@ class LuceboxServer(ServerBase):
         )
 
     def drafter_path(self, args: argparse.Namespace) -> Path | None:
-        repo, file = hf_args(
-            label="prefill drafter",
+        """Perform the drafter path operation.
+
+        Args:
+            args: The args.
+
+        Returns:
+            Path | None: The drafter path result.
+
+        Raises:
+            SystemExit: If the drafter path operation cannot be completed."""
+        return Model.from_args(
+            "prefill drafter",
+            local=cast(Path, args.prefill_drafter) if args.prefill_drafter else None,
             spec=args.prefill_drafter_hf,
             repo=args.prefill_drafter_hf_repo,
             file=args.prefill_drafter_hf_file,
-        )
-        if repo:
-            file = hf_file(
-                repo,
-                file,
-                "prefill drafter",
-                suffixes=(".gguf", ".safetensors", ".safetensors.index.json"),
-                default="model.safetensors",
-            )
-            if file.endswith(".gguf"):
-                return hf_get(repo, file, "prefill drafter GGUF")
-            snap = hf_snap(repo, "prefill drafter")
-            src = snap / file
-            if not src.exists():
-                raise SystemExit(f"prefill drafter source {file} not found in {repo}")
-            return ensure_gguf(src, label="prefill drafter", repo=repo, outtype="bf16")
-        if args.prefill_drafter is None:
-            return None
-        return ensure_gguf(
-            cast(Path, args.prefill_drafter), label="prefill drafter", outtype="bf16"
-        )
+            outtype="bf16",
+            default="model.safetensors",
+        ).resolve(required=False)
 
     def set_env(self, args: argparse.Namespace) -> None:
+        """Perform the set env operation.
+
+        Args:
+            args: The args.
+
+        Raises:
+            SystemExit: If the set env operation cannot be completed."""
         if not 0.0 < args.pflash_alpha < 1.0:
             raise SystemExit("--pflash-alpha must be in (0, 1)")
         if args.cache_type_k:
@@ -422,6 +479,17 @@ class LuceboxServer(ServerBase):
             os.environ.setdefault("DFLASH27B_FA_WINDOW", "0")
 
     def build(self, args: argparse.Namespace, extra: list[str]) -> Spec:
+        """Build the process specification for parsed server arguments.
+
+        Args:
+            args: The args.
+            extra: The extra.
+
+        Returns:
+            Spec: The build result.
+
+        Raises:
+            SystemExit: If the build operation cannot be completed."""
         if extra:
             raise SystemExit(f"unexpected extra args for lucebox server: {' '.join(extra)}")
 
@@ -429,28 +497,21 @@ class LuceboxServer(ServerBase):
         luce, JSONResponse, AutoTokenizer = load_luce()
         luce.MODEL_NAME = args.model_name
 
-        target_repo, target_file = hf_args(
-            label="target", spec=args.target_hf, repo=args.target_hf_repo, file=args.target_hf_file
-        )
-        draft_repo, draft_file = hf_args(
-            label="draft",
+        target = Model.from_args(
+            "target GGUF",
+            local=cast(Path, args.target),
+            spec=args.target_hf,
+            repo=args.target_hf_repo,
+            file=args.target_hf_file,
+        ).pick(suffixes=(".gguf",))
+        draft_src = Model.from_args(
+            "draft weights",
+            local=cast(Path, args.draft),
             spec=args.draft_hf,
             repo=args.draft_hf_repo,
             file=args.draft_hf_file,
             default="model.safetensors",
-        )
-        target = pick_asset(
-            label="target GGUF",
-            local=None if target_repo else cast(Path, args.target),
-            repo=target_repo,
-            file=target_file,
-            suffixes=(".gguf",),
-        )
-        draft_src = pick_asset(
-            label="draft weights",
-            local=None if draft_repo else cast(Path, args.draft),
-            repo=draft_repo,
-            file=draft_file,
+        ).pick(
             suffixes=(".safetensors", ".safetensors.index.json"),
             default="model.safetensors",
         )
@@ -495,6 +556,10 @@ class LuceboxServer(ServerBase):
 
         @app.get("/health")
         def health() -> Any:
+            """Perform the health operation.
+
+            Returns:
+                Any: The health result."""
             return JSONResponse({"status": "ok", "model": args.model_name})
 
         return Spec(
@@ -515,6 +580,10 @@ class LuceboxServer(ServerBase):
         )
 
     def warmup(self, spec: Spec) -> None:
+        """Log resolved server assets before startup.
+
+        Args:
+            spec: The spec."""
         prefill = spec.data["prefill"]
         self.log.info("Luce DFlash OpenAI server on http://%s:%s", spec.host, spec.port)
         self.log.info("Model name: %s", spec.data["model"])
@@ -537,6 +606,13 @@ class LuceboxServer(ServerBase):
             self.log.info("Pflash disabled")
 
     def run(self, spec: Spec) -> int:
+        """Run a built server process specification.
+
+        Args:
+            spec: The spec.
+
+        Returns:
+            int: The run result."""
         import uvicorn
 
         uvicorn.run(spec.app, host=spec.host, port=spec.port, log_level="info")

@@ -5,9 +5,14 @@
 # Qwen3.8 NVFP4 chat uses vLLM MTP; auxiliary GGUF routes remain on llama.cpp.
 
 healthCheckTimeout: 1800
-logLevel: debug
+logLevel: info
 sendLoadingState: false
 globalTTL: 0
+
+hooks:
+  on_startup:
+    preload:
+      - "qwen3-chat"
 
 macros:
   server_bin: "/usr/local/bin/easyllama"
@@ -16,11 +21,12 @@ macros:
   vllm_bin: "/usr/local/bin/vllm"
   vllm_url: "http://127.0.0.1:18000"
   chat_ctx_size: "155200"
-  chat_max_num_seqs: "32"
-  chat_kv_offloading_size: "8"
+  chat_max_num_seqs: "2"
+  chat_max_num_batched_tokens: "8192"
+  chat_kv_offloading_size: "12"
   emb_ctx_size: "131072"
   qwen3_chat_target_hf: "unsloth/Qwen3.8-27B-NVFP4"
-  speculative_config: "'{\"method\":\"mtp\",\"num_speculative_tokens\":3}'"
+  speculative_config: "'{\"method\":\"mtp\",\"num_speculative_tokens\":1}'"
   pi_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
   n_predict: "-1"
   temp: "0.7"
@@ -58,7 +64,7 @@ macros:
   rerank_ctx_size: "4096"
 models:
   "qwen3-chat":
-    concurrencyLimit: 4
+    concurrencyLimit: 1
     name: "Pi Qwen3.8 Chat 27B NVFP4 MTP"
     description: "Primary chat/completions model served by vLLM with MTP speculative decoding"
     cmd: |
@@ -66,6 +72,7 @@ models:
       serve
       --vllm-url ${vllm_url}
       --listen :${PORT}
+      --sleep-level 2
       --wait-timeout 1800s
       --
       /app/bin/log-exec
@@ -77,11 +84,14 @@ models:
       --served-model-name qwen3-chat
       --max-model-len ${chat_ctx_size}
       --max-num-seqs ${chat_max_num_seqs}
+      --max-num-batched-tokens ${chat_max_num_batched_tokens}
       --kv-cache-dtype fp8
       --kv-offloading-size ${chat_kv_offloading_size}
+      --gpu-memory-utilization 0.94
+      --no-enable-flashinfer-autotune
       --enforce-eager
-      --skip-mm-profiling
-      --uvicorn-log-level debug
+      --language-model-only
+      --uvicorn-log-level info
       --enable-log-requests
       --log-error-stack
       --reasoning-parser qwen3
@@ -93,11 +103,12 @@ models:
       ${vllm_wrapper_bin}
       sleep
       --vllm-url ${vllm_url}
+      --sleep-level 2
       --stop-pid ${PID}
     env:
       - "HF_TOKEN=${env.HF_TOKEN}"
       - "VLLM_SERVER_DEV_MODE=1"
-      - "VLLM_LOGGING_LEVEL=DEBUG"
+      - "VLLM_LOGGING_LEVEL=INFO"
       - "PYTHONFAULTHANDLER=1"
 
   "qwen3-embeddings":
@@ -121,8 +132,6 @@ models:
       ${no_mmap}
       --embedding
       ${no_warmup}
-    cmdStop: |
-      pkill -KILL -P ${PID}
-      kill -KILL ${PID}
+    cmdStop: /bin/kill -TERM ${PID}
     env:
       - "HF_TOKEN=${env.HF_TOKEN}"
