@@ -15,7 +15,7 @@ hooks:
       - "qwen3-chat"
 
 macros:
-  server_bin: "/usr/local/bin/easyllama"
+  server_bin: "/opt/venv/bin/easyllama"
   vllm_wrapper_bin: "/app/bin/vllm-wrapper"
   vllm_bin: "/opt/venv/bin/vllm"
   qwen3_chat_target_hf: "unsloth/Qwen3.8-27B-NVFP4"
