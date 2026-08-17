@@ -22,7 +22,7 @@ macros:
   pi_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
 models:
   "qwen3-chat":
-    concurrencyLimit: 1
+    concurrencyLimit: 4
     name: "Qwen3.8 Chat 27B NVFP4"
     description: "Primary chat/completions model served from raw ModelOpt NVFP4 weights by vLLM"
     cmd: |
@@ -30,7 +30,7 @@ models:
       serve
       --vllm-url http://127.0.0.1:18000
       --listen :${PORT}
-      --sleep-level 1
+      --sleep-level 2
       --wait-timeout 1800s
       --
       /app/bin/log-exec
@@ -40,17 +40,19 @@ models:
       --host 127.0.0.1
       --port 18000
       --served-model-name qwen3-chat
-      --max-model-len 131072
-      --max-num-seqs 1
-      --max-num-batched-tokens 4096
-      --kv-cache-dtype fp8
-      --gpu-memory-utilization 0.90
+      --max-model-len 262144
+      --max-num-seqs 4
+      --max-num-batched-tokens 8192
+      --kv-cache-dtype turboquant_k8v4
+      --gpu-memory-utilization 0.94
       --no-enable-flashinfer-autotune
+      --attention-config.flash_attn_version=2
       --enforce-eager
-      --language-model-only
       --uvicorn-log-level info
       --enable-log-requests
       --log-error-stack
+      --chat-template /chat_template/qwen3.8.jinja
+      --default-chat-template-kwargs '{"enable_thinking":true,"preserve_thinking":false}'
       --reasoning-parser qwen3
       --enable-auto-tool-choice
       --tool-call-parser qwen3_coder
@@ -79,7 +81,7 @@ models:
       --bin /app/bin/llama-server-qwen
       --port ${PORT}
       -hf ${pi_emb_hf_model}
-      --ctx-size 131072
+      --ctx-size 262144
       --batch-size 2048
       --ubatch-size 1024
       --parallel 1

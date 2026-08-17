@@ -5,13 +5,19 @@ Release history pulled from GitHub releases:
 
 Format follows Keep a Changelog style where possible, based on published release notes.
 
-## [Unreleased]
+## [v0.5.0] - 2026-08-17
+
+Tuning release for the Qwen profile: 256K context, TurboQuant KV cache, multi-sequence scheduling, and pinned vLLM build.
 
 ### Changed
 
 - Renamed the `mtp` runtime profile to `qwen`, including its config files, Docker target, image tag, and auxiliary llama-server path.
 - Replaced the Unsloth MTP checkpoint with raw `RadixArk/Qwen3.8-27B-NVFP4` ModelOpt weights and disabled speculative decoding.
-- Updated current README and API references for the Qwen profile's 128K configured context and FP8 KV cache.
+- Raised the Qwen profile's configured context from 128K to 256K tokens and switched the KV cache from FP8 to TurboQuant (k8v4); the auxiliary embedding server now runs a matching 262,144-token context.
+- Raised Qwen chat concurrency from 1 to 4: `max-num-seqs` 4 and `max-num-batched-tokens` 8192, with GPU memory utilization raised to 0.94 and vLLM wrapper sleep level 2.
+- Pinned the in-tree vLLM build to tag `v0.27.1` via the `VLLM_REF` Docker build arg and added `libcublas-dev-13-0` to the build dependencies.
+- Enabled FlashAttention 2 for Qwen chat and serve a custom `qwen3.8.jinja` chat template with thinking enabled by default; dropped `--language-model-only`.
+- Updated current README and API references for the Qwen profile's 256K configured context and TurboQuant KV cache.
 
 ## [v0.4.0] - 2026-08-15
 

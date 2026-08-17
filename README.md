@@ -32,7 +32,7 @@ Project goal: one host command surface, one public port, one shared model cache,
 - One shared mmproj asset directory: `mmproj/`
 - Stable model IDs exposed through `/v1/models`
 - Per-model `concurrencyLimit: 4` in llama-swap configs to cap parallel requests
-- Qwen vLLM profile with raw ModelOpt NVFP4 weights, 128K configured context, and FP8 KV cache
+- Qwen vLLM profile with raw ModelOpt NVFP4 weights, 256K configured context, and TurboQuant KV cache
 - Higher process limit and 8 GiB shared memory for the vLLM runtime
 - `GGML_CUDA_ENABLE_UNIFIED_MEMORY=1` for oversubscribed llama.cpp VRAM on RTX 5090
 - Lazy downloads by default; use warmup for predictable first-request latency

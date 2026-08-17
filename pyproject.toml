@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "easyllama"
-version = "0.4.0"
+version = "0.5.0"
 description = "Mode-aware local llama.cpp and vLLM runner behind llama-swap"
 requires-python = ">=3.11"
 dependencies = [

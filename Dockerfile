@@ -105,6 +105,7 @@ RUN --mount=type=cache,id=llamacpp-apt-cache-runtime,target=/var/cache/apt,shari
     gcc \
     libc6-dev \
     cuda-nvcc-13-0 \
+    libcublas-dev-13-0 \
     libcurand-dev-13-0 \
     curl \
     jq \
@@ -300,6 +301,7 @@ RUN --mount=type=cache,id=llamacpp-ccache,target=/root/.cache/ccache,sharing=loc
 # llama.cpp instead of inheriting the independently maintained qwen38 image.
 FROM builder-base AS vllm-builder
 ARG VLLM_REPO=https://github.com/vllm-project/vllm.git
+ARG VLLM_REF=v0.27.1
 # RTX 5090 / Blackwell only: avoid compiling legacy SM75-SM110 kernels.
 ENV VLLM_TARGET_DEVICE=cuda
 # vLLM derives each component's family-specific gencode from this list.
@@ -310,7 +312,7 @@ RUN --mount=type=cache,id=llamacpp-pip-cache,target=/root/.cache/pip,sharing=loc
     apt-get update \
     && apt-get install -y --no-install-recommends python3 python3-dev python3-pip python3-venv ninja-build \
     && rm -rf /var/lib/apt/lists/* \
-    && git clone --depth 1 "${VLLM_REPO}" /src/vllm \
+    && git clone --depth 1 --branch "${VLLM_REF}" "${VLLM_REPO}" /src/vllm \
     && cd /src/vllm \
     # Model inspection imports a bundled flash-attention extension. Build FA2 \
     # retargeted by TORCH_CUDA_ARCH_LIST to SM120; skip Hopper-specific FA3. \
