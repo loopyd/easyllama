@@ -15,6 +15,10 @@ mmproj/*
 !mmproj/.gitkeep
 chat_template/*
 !chat_template/.gitkeep
+!chat_template/README.md
+!chat_template/qwen3.5.jinja
+!chat_template/qwen3.6.jinja
+!chat_template/qwen3.8.jinja
 
 # Logs and temp files
 *.log

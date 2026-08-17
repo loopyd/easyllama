@@ -14,5 +14,6 @@ path such as:
 --chat-template-file /chat_template/qwen3.6.jinja
 ```
 
-The MTP vLLM chat route uses the model's native template; the auxiliary
-llama.cpp routes may use templates from this directory.
+The `qwen` vLLM chat route serves `/chat_template/qwen3.8.jinja` explicitly
+(via `--chat-template`); the auxiliary llama.cpp routes may use templates from
+this directory.
