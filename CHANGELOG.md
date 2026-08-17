@@ -5,6 +5,15 @@ Release history pulled from GitHub releases:
 
 Format follows Keep a Changelog style where possible, based on published release notes.
 
+## [v0.5.1] - 2026-08-17
+
+Patch release fixing the Qwen chat template shipping gap.
+
+### Fixed
+
+- Tracked `chat_template/qwen3.8.jinja` in git; `.gitignore` previously excluded it, so fresh clones and Docker builds were missing the template the `qwen` vLLM route references at `/chat_template/qwen3.8.jinja`.
+- Corrected `chat_template/README.md`, which still claimed the vLLM chat route uses the model's native template.
+
 ## [v0.5.0] - 2026-08-17
 
 Tuning release for the Qwen profile: 256K context, TurboQuant KV cache, multi-sequence scheduling, and pinned vLLM build.
