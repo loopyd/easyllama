@@ -2,7 +2,7 @@
 #
 # Local runtime configuration template for Qwen mode.
 # Copy this file to config/config.qwen.yml for local edits and overrides.
-# Qwen3.8 NVFP4 chat uses raw ModelOpt weights; auxiliary GGUF routes remain on llama.cpp.
+# Qwen3.8 RTX 5090 NVFP4 chat uses raw ModelOpt weights; auxiliary GGUF routes remain on llama.cpp.
 
 healthCheckTimeout: 1800
 logLevel: info
@@ -18,13 +18,13 @@ macros:
   server_bin: "/opt/venv/bin/easyllama"
   vllm_wrapper_bin: "/app/bin/vllm-wrapper"
   vllm_bin: "/opt/venv/bin/vllm"
-  qwen3_chat_target_hf: "RadixArk/Qwen3.8-27B-NVFP4"
+  qwen3_chat_target_hf: "gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090"
   pi_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
 models:
   "qwen3-chat":
     concurrencyLimit: 4
-    name: "Qwen3.8 Chat 27B NVFP4"
-    description: "Primary chat/completions model served from raw ModelOpt NVFP4 weights by vLLM"
+    name: "Qwen3.8 Chat 27B NVFP4 RTX 5090"
+    description: "Primary thinking/tool-use model; RTX 5090 ModelOpt NVFP4 weights served by vLLM"
     cmd: |
       ${vllm_wrapper_bin}
       serve
@@ -41,13 +41,12 @@ models:
       --port 18000
       --served-model-name qwen3-chat
       --max-model-len 262144
-      --max-num-seqs 4
-      --max-num-batched-tokens 8192
-      --kv-cache-dtype turboquant_k8v4
-      --gpu-memory-utilization 0.94
-      --no-enable-flashinfer-autotune
-      --attention-config.flash_attn_version=2
-      --enforce-eager
+      --quantization modelopt
+      --trust-remote-code
+      --max-num-seqs 16
+      --kv-cache-dtype fp8
+      --gpu-memory-utilization 0.96
+      --compilation-config.max_cudagraph_capture_size=4
       --uvicorn-log-level info
       --enable-log-requests
       --log-error-stack
@@ -55,7 +54,7 @@ models:
       --default-chat-template-kwargs '{"enable_thinking":true,"preserve_thinking":false}'
       --reasoning-parser qwen3
       --enable-auto-tool-choice
-      --tool-call-parser qwen3_coder
+      --tool-call-parser qwen3_xml
       --enable-sleep-mode
       --enable-chunked-prefill
     cmdStop: |

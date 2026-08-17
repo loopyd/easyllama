@@ -5,6 +5,18 @@ Release history pulled from GitHub releases:
 
 Format follows Keep a Changelog style where possible, based on published release notes.
 
+## [v0.5.2] - 2026-08-17
+
+Qwen profile tuned for the RTX 5090-specific checkpoint.
+
+### Changed
+
+- `qwen` profile now serves `gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090` (RTX 5090-tuned ModelOpt weights) instead of `RadixArk/Qwen3.8-27B-NVFP4`.
+- KV cache switched from TurboQuant k8v4 to FP8 at the full native 262,144-token context; GPU memory utilization raised to `0.96`.
+- Dropped `--enforce-eager`, added `--quantization modelopt`, `--trust-remote-code`, and `--compilation-config.max_cudagraph_capture_size=4`; scheduler concurrency raised from 4 to 16 sequences.
+- Tool-call parser switched from `qwen3_coder` to `qwen3_xml`; thinking enabled via the mounted `qwen3.8.jinja` template.
+- Updated `README.md`, `API.md`, and the qwen config example to match the new flags and model target.
+
 ## [v0.5.1] - 2026-08-17
 
 Patch release fixing the Qwen chat template shipping gap.

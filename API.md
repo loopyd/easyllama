@@ -46,7 +46,7 @@ These stable IDs are exposed through `/v1/models`.
 | --- | --- |
 | `basic` | `unsloth/Qwen3.6-27B-GGUF:Q4_K_M` |
 | `turboquant` | `unsloth/Qwen3.6-27B-GGUF:UD-Q5_K_XL` |
-| `qwen` | `RadixArk/Qwen3.8-27B-NVFP4` (raw ModelOpt weights served by vLLM without speculative decoding, 256K configured context, and TurboQuant KV cache) |
+| `qwen` | `gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090` (RTX 5090-specific ModelOpt weights served by vLLM without speculative decoding, full 262,144-token context, FP8 KV cache, and thinking enabled) |
 | `spiritbuun` | target `unsloth/Qwen3.6-27B-GGUF:Q5_K_M`, draft `Ardenzard/Qwen3.6-27B-DFlash-GGUF:Qwen3.6-27B-DFlash-Q5_K_M.gguf` |
 | `lucebox` | target `unsloth/Qwen3.6-27B-GGUF:Q4_K_M`, draft `KingsonHO/Qwen3.6-27B-DFlash:model.safetensors` |
 

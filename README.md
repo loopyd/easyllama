@@ -32,7 +32,7 @@ Project goal: one host command surface, one public port, one shared model cache,
 - One shared mmproj asset directory: `mmproj/`
 - Stable model IDs exposed through `/v1/models`
 - Per-model `concurrencyLimit: 4` in llama-swap configs to cap parallel requests
-- Qwen vLLM profile with raw ModelOpt NVFP4 weights, 256K configured context, and TurboQuant KV cache
+- Qwen vLLM profile with RTX 5090-specific ModelOpt NVFP4 weights, full 262,144-token context, FP8 KV cache, and thinking enabled
 - Higher process limit and 8 GiB shared memory for the vLLM runtime
 - `GGML_CUDA_ENABLE_UNIFIED_MEMORY=1` for oversubscribed llama.cpp VRAM on RTX 5090
 - Lazy downloads by default; use warmup for predictable first-request latency
@@ -47,13 +47,11 @@ Choose a mode by backend behavior; the setup flow is the same for all five modes
 | --- | --- | --- | --- | --- |
 | `basic` | Plain llama.cpp path | `llama-server-basic` | `unsloth/Qwen3.6-27B-GGUF:Q4_K_M` | none |
 | `turboquant` | Turboquant KV-cache experiments | `llama-server-turboquant` | `unsloth/Qwen3.6-27B-GGUF:UD-Q5_K_XL` | none |
-| `qwen` | Qwen3.8 NVFP4 inference with llama.cpp auxiliary routes | `vllm` via `vllm-wrapper` | `RadixArk/Qwen3.8-27B-NVFP4` | none |
+| `qwen` | Qwen3.8 RTX 5090 NVFP4 inference with llama.cpp auxiliary routes | `vllm` via `vllm-wrapper` | `gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090` | none |
 | `spiritbuun` | buun-llama-cpp DFlash experiments | `easyllama server spiritbuun` | `unsloth/Qwen3.6-27B-GGUF:Q5_K_M` + `Ardenzard/Qwen3.6-27B-DFlash-GGUF:Qwen3.6-27B-DFlash-Q5_K_M.gguf` | none |
 | `lucebox` | Luce dflash/pflash experiments | `easyllama server lucebox` | `unsloth/Qwen3.6-27B-GGUF:Q4_K_M` + `KingsonHO/Qwen3.6-27B-DFlash:model.safetensors` | `POST /v1/messages` |
 
-The `qwen` profile serves raw ModelOpt Qwen3.8-27B NVFP4 weights through vLLM without speculative decoding. On a 32 GiB Blackwell GPU, FP8 KV cache uses an 8 GiB native CPU offload buffer while vLLM dynamically allocates the GPU-resident KV cache. Its hybrid image keeps the embedding route on llama.cpp. llama-swap v250 sleeps the vLLM worker when switching routes and wakes it on demand.
-
-`--max-num-seqs 32` lets one vLLM scheduler iteration process up to 32 sequences. It is a sequence-concurrency limit, not a 32-token batch size. llama-swap still limits each public model route to four parallel requests.
+The `qwen` profile serves the RTX 5090-specific ModelOpt Qwen3.8-27B NVFP4 checkpoint through vLLM without speculative decoding. It uses the full native 262,144-token context, FP8 KV cache, 0.96 GPU memory utilization, and the mounted Qwen3.8 template with thinking enabled. Sixteen scheduler sequences follow the checkpoint's recommended vLLM profile, while four public-route requests cap user-visible concurrency on a 32 GiB RTX 5090. Its hybrid image keeps the embedding route on llama.cpp; llama-swap v250 sleeps the vLLM worker when switching routes and wakes it on demand.
 
 ## System requirements
 
