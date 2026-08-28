@@ -88,17 +88,28 @@ require_tool jq
 
 cd "${REPO_ROOT}"
 
-BASE_URL="${BASE_URL:-http://127.0.0.1:8080}"
-AUTH_FILE="${AUTH_FILE:-${REPO_ROOT}/auth.json}"
+if [[ -x "${REPO_ROOT}/.venv/bin/python" ]]; then
+  PYTHON_BIN="${PYTHON_BIN:-${REPO_ROOT}/.venv/bin/python}"
+else
+  PYTHON_BIN="${PYTHON_BIN:-python3}"
+fi
+mapfile -t resolved_config < <(MODE_NAME="${MODE}" "${PYTHON_BIN}" - <<'PY'
+import os
+
+from easyllama.config import Config
+
+settings = Config.load(mode_override=os.environ["MODE_NAME"])
+print(settings.listen_url())
+print(settings.credentials.api_key or "")
+PY
+)
+BASE_URL="${BASE_URL:-${resolved_config[0]}}"
 CHAT_MODEL="${CHAT_MODEL:-qwen3-chat}"
 GEN_MODEL="${GEN_MODEL:-${CHAT_MODEL}}"
 EMBED_MODEL="${EMBED_MODEL:-qwen3-embeddings}"
 EXPECTED_EMBED_DIM="${EXPECTED_EMBED_DIM:-}"
 
-API_KEY_VALUE="${API_KEY:-}"
-if [[ -z "${API_KEY_VALUE}" && -f "${AUTH_FILE}" ]]; then
-  API_KEY_VALUE="$(jq -r '.api_key // empty' "${AUTH_FILE}")"
-fi
+API_KEY_VALUE="${API_KEY:-${resolved_config[1]}}"
 
 AUTH_ARGS=()
 if [[ -n "${API_KEY_VALUE}" ]]; then

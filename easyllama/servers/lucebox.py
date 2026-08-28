@@ -242,18 +242,14 @@ def load_luce() -> tuple[Any, Any, Any]:
             docker_target="runtime-lucebox",
             build_sources=(
                 BuildSource(
-                    label="basic",
-                    repo_attr="llama_cpp_repo",
-                    ref_attr="llama_cpp_ref",
+                    label="llamacpp",
+                    repo_attr="lucebox",
                     repo_build_arg="LLAMA_CPP_REPO",
                     ref_build_arg="LLAMA_CPP_REF",
-                    default_repo="https://github.com/Luce-Org/llama.cpp.git",
-                    default_ref="luce-dflash",
                 ),
                 BuildSource(
                     label="lucebox-hub",
-                    repo_attr="lucebox_hub_repo",
-                    ref_attr="lucebox_hub_ref",
+                    repo_attr="lucebox_hub",
                     repo_build_arg="LUCEBOX_HUB_REPO",
                     ref_build_arg="LUCEBOX_HUB_REF",
                 ),

@@ -62,7 +62,7 @@ class ColorFormatter(logging.Formatter):
 
         Args:
             use_color: The use color."""
-        super().__init__("%(levelname)s %(message)s")
+        super().__init__("%(levelname)s%(container_tag)s %(message)s")
         self.use_color = use_color
 
     def format(self, record: logging.LogRecord) -> str:
@@ -74,6 +74,8 @@ class ColorFormatter(logging.Formatter):
         Returns:
             str: The format result."""
         level_name = record.levelname
+        container = getattr(record, "container", None)
+        record.__dict__["container_tag"] = f" [{container}]" if container else ""
         if self.use_color:
             color = LEVEL_COLORS.get(record.levelno, "")
             if color:
@@ -82,6 +84,7 @@ class ColorFormatter(logging.Formatter):
             return super().format(record)
         finally:
             record.levelname = level_name
+            del record.__dict__["container_tag"]
 
 
 class Logger:

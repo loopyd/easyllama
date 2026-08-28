@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "easyllama"
-version = "0.5.2"
+version = "0.5.3"
 description = "Mode-aware local llama.cpp and vLLM runner behind llama-swap"
 requires-python = ">=3.11"
 dependencies = [
@@ -14,6 +14,7 @@ dependencies = [
     "huggingface_hub",
     "jinja2",
     "protobuf",
+    "pydantic>=2",
     "pycurl",
     "pyyaml",
     "sentencepiece",
@@ -24,7 +25,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["ruff"]
+dev = ["pytest", "ruff"]
 
 [project.scripts]
 easyllama = "easyllama.main:main"
@@ -32,48 +33,25 @@ easyllama = "easyllama.main:main"
 [tool.setuptools.packages.find]
 include = ["easyllama", "easyllama.*"]
 
-[tool.easyllama.defaults]
-image_name_base = "easyllama-local"
-image_tag_base = "cuda13"
-container_name = "easyllama-server-swap"
-host_port = 8080
-container_port = 8080
-pids_limit = 256
-models_dir = "models"
-mmproj_dir = "mmproj"
-chat_template_dir = "chat_template"
-auth_file = "auth.json"
-auth_example_file = "auth.json.example"
-llama_cpp_repo = "https://github.com/ggml-org/llama.cpp.git"
-llama_cpp_ref = "master"
-
-lucebox_hub_repo = "https://github.com/Luce-Org/lucebox-hub.git"
-lucebox_hub_ref = "main"
-cuda_default_architectures = "120"
-log_level = "debug"
-
-[tool.easyllama.configs]
-basic = "config/config.basic.yml"
-basic_example = "config/config.basic.yml.example"
-turboquant = "config/config.turboquant.yml"
-turboquant_example = "config/config.turboquant.yml.example"
-spiritbuun = "config/config.spiritbuun.yml"
-spiritbuun_example = "config/config.spiritbuun.yml.example"
-qwen = "config/config.qwen.yml"
-qwen_example = "config/config.qwen.yml.example"
-lucebox = "config/config.lucebox.yml"
-lucebox_example = "config/config.lucebox.yml.example"
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+markers = [
+    "unit: fast isolated tests",
+    "integration: tests requiring Docker or external services",
+    "docker: Docker compiler and runtime orchestration tests",
+]
 
 [tool.ruff]
 target-version = "py311"
 line-length = 100
-src = ["easyllama"]
+src = ["easyllama", "tests"]
 extend-exclude = [
 	".runtime",
 	".venv",
 	"chat_template",
 	"mmproj",
-	"models",
+	"cache",
 ]
 
 [tool.ruff.lint]

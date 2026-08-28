@@ -1,6 +1,6 @@
 ---
 name: easyllama-provider
-description: 'Add or refactor an easyllama provider or mode. Use when integrating a new llama.cpp fork/backend, creating or extending launchers in easyllama/servers, wiring Dockerfile targets and config templates, updating README mode docs, rebuilding the mode image, warming models, and running the full public endpoint regression suite.'
+description: 'Add or refactor an easyllama provider or mode. Use when integrating a backend, creating a mode-specific launcher, wiring composable Docker stages and nested config.json defaults, rebuilding the stack, warming models, and running endpoint regressions.'
 argument-hint: 'Provider or mode name, upstream repo/ref, and whether it needs a dedicated server class'
 ---
 
@@ -28,25 +28,26 @@ Create or update a provider mode for this repository without reintroducing hardc
 
 1. Choose the launcher shape.
 
-   - If the provider behaves like an existing plain launcher, prefer extending existing server metadata instead of adding new runtime branches.
-   - If the provider needs custom model resolution, middleware, request rewriting, or special launch flags, create `easyllama/servers/<provider>.py`.
+   - Every mode owns a dedicated launcher module and `@server_metadata(...)`; plain llama.cpp fallback commands use `easyllama server llamacpp`.
+   - Reuse `LlamaCppServer` behavior by subclassing it when only the binary and metadata differ. Add custom model resolution or middleware only when required.
 
-2. Put runtime mode metadata on the server layer.
+2. Put runtime metadata in its existing source of truth.
 
-   - Add or extend `@server_metadata(...)` on the relevant server class.
-   - Declare the mode name, Docker target, and build-source repo/ref mappings there.
-   - Register any new server class in `easyllama/servers/__init__.py`.
-   - Do not add new mode-specific `if` branches or hardcoded mode lists in `runtime.py`, `config.py`, or `cli.py` when registry metadata can drive the behavior.
+   - Add launcher/build metadata through `@server_metadata(...)` and register new server classes in `easyllama/servers/__init__.py`.
+   - Add the source repository and ordered service roles under `modes.<mode>` in `config.json.example` and the matching Pydantic model.
+   - Reuse shared `resources.roles`; add a role only when the provider introduces a distinct container service.
+   - Do not duplicate mode lists or service assignments in `runtime.py`, `cli.py`, or helper registries.
 
 3. Wire project defaults and config files.
 
-   - Update `pyproject.toml` defaults for new repo/ref settings when the provider introduces new upstream sources.
-   - Add `config/config.<provider>.yml.example` and make sure the mode can resolve its active and example config paths.
-   - If live validation needs pinned local settings, copy the example to an ignored `config/config.<provider>.yml`, but keep the tracked example as the release artifact.
+   - Add `config/config.<provider>.yml.example`; the active path is derived as `config/config.<provider>.yml`.
+   - Use top-level `llama_swap_override` only for a custom path; do not add per-mode path maps.
+   - Keep host capacity/profile floors under `resources`, Docker image/CUDA settings under `docker`, and credentials under `credentials`.
+   - If live validation needs pinned local settings, copy the example to the ignored active path; keep the tracked example as the release artifact.
 
 4. Add Docker build and runtime targets.
 
-   - Add a builder stage and runtime target in `Dockerfile`.
+   - Add the minimal builder/runtime stages under `docker/*.Dockerfile`; `DockerfileCompiler` composes the selected image role.
    - Copy the required binary and any companion assets into the runtime image.
    - Expose the runtime binary under `/app/bin/llama-server-<provider>` or the provider-specific equivalent.
 
@@ -92,9 +93,9 @@ Create or update a provider mode for this repository without reintroducing hardc
 
    The provider integration is done when all of the following are true:
 
-   - the mode builds from its Dockerfile target
-   - runtime, config, and CLI behavior come from shared metadata rather than new hardcoded mode branches
-   - the tracked config example and README describe the shipped behavior
+   - the mode builds every required isolated image role and joins its private `easyllama-<mode>` network
+   - runtime, config, and CLI behavior come from `modes`, shared `resources.roles`, and server metadata rather than duplicated branches
+   - `config.json.example`, the mode YAML example, and README describe the shipped behavior
    - the rebuilt mode warms successfully
    - the full public endpoint suite passes after the rebuild
 

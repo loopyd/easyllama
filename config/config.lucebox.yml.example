@@ -1,36 +1,21 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/mostlygeek/llama-swap/refs/heads/main/config-schema.json
-#
-# Copy this file to config/config.lucebox.yml for local edits and overrides.
-# Use this mode with ./run.sh --mode lucebox start when you want Luce
-# dflash+pflash for qwen3-chat and plain llama-server for the other models.
-
-healthCheckTimeout: 1800
-logLevel: info
-sendLoadingState: false
-globalTTL: 0
-
-# Shared llama-server argument macros
 macros:
-  server_bin: "/opt/venv/bin/easyllama"
-  pi_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
-  dflash_pflash_profile: ""
-  dflash_cache_args: ""
-
+  pi_emb_hf_model: Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M
+  dflash_pflash_profile: ''
+  dflash_cache_args: ''
 models:
-  "qwen3-chat":
+  qwen3-chat:
     concurrencyLimit: 4
-    name: "Pi Qwen3 Chat"
-    description: "Primary Luce dflash+pflash chat/messages model with SSE"
+    name: Pi Qwen3 Chat
+    description: Primary Luce dflash+pflash chat/messages model with SSE
     filters:
       setParams:
-        reasoning: "off"
+        reasoning: 'off'
         chat_template_kwargs:
           tokenize: false
           add_generation_prompt: true
           enable_thinking: false
           preserve_thinking: false
-    cmd: |
-      ${server_bin}
+    cmd: '${server_bin}
       server
       lucebox
       --port ${PORT}
@@ -51,19 +36,15 @@ models:
       --pflash-use-bsa 1
       --pflash-alpha 0.85
       ${dflash_pflash_profile}
-
-    env:
-      - "HF_TOKEN=${env.HF_TOKEN}"
-
-  "qwen3-embeddings":
+      '
+  qwen3-embeddings:
     concurrencyLimit: 4
-    name: "Pi Qwen3 Embeddings 8B"
-    description: "Dense embedding model for vector search, RAG, similarity"
-    cmd: |
-      ${server_bin}
+    name: Pi Qwen3 Embeddings 8B
+    description: Dense embedding model for vector search, RAG, similarity
+    cmd: '${server_bin}
       server
-      basic
-      --bin /app/bin/llama-server-basic
+      llamacpp
+      --bin /app/bin/llama-server-llamacpp
       --port ${PORT}
       -hf ${pi_emb_hf_model}
       --ctx-size 131072
@@ -77,6 +58,4 @@ models:
       --no-mmap
       --embedding
       --no-warmup
-
-    env:
-      - "HF_TOKEN=${env.HF_TOKEN}"
+      '

@@ -12,7 +12,7 @@ import threading
 import time
 import types
 
-from .config import LLAMA_SWAP_BIN, RUNTIME_HOST, Config
+from .config import CONTAINERPATH, RUNTIME, Config
 from .helpers.hf import HuggingFace
 from .helpers.http import Http
 from .helpers.logger import LOG as APP_LOG
@@ -160,7 +160,7 @@ def _prefetch_models(settings: Config, model_ids: list[str]) -> None:
             hf = HuggingFace(model_id, repo)
             hf.get(
                 hf.file(selector, suffixes=(".gguf",)),
-                cache_dir=settings.models_dir,
+                cache_dir=settings.dirs.models,
                 warmup=f"Warming model {position}/{total_models}: {model_id}",
             )
 
@@ -183,15 +183,17 @@ def warmup_models(settings: Config, model_ids: list[str]) -> int:
     api_key = settings.resolved_api_key(auth)
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     base_url = settings.listen_url()
-    warmup_timeout = int(settings.env("WARMUP_TIMEOUT", "1800") or "1800")
-    warmup_poll_interval = float(settings.env("WARMUP_POLL_INTERVAL", "2") or "2")
-    if settings.runtime_mode == RUNTIME_HOST:
+    warmup_timeout = settings.warmup.timeout
+    warmup_poll_interval = settings.warmup.poll_interval
+    if settings.runtime.environment == RUNTIME.HOST:
         from .helpers.docker import DockerRuntime
 
         runtime = DockerRuntime(settings)
         runtime.ensure_daemon()
         if not runtime.is_running():
-            raise SystemExit(f"container {settings.container_name} is not running; start it first")
+            raise SystemExit(
+                f"container {settings.docker.container_name} is not running; start it first"
+            )
     http = Http(base_url, headers=headers)
     health_status, _ = http.at("health").response()
     if health_status >= 400:
@@ -293,14 +295,14 @@ def serve(settings: Config) -> int:
     Raises:
         SystemExit: If the serve operation cannot be completed."""
     config_path = settings.container_config_path()
-    llama_swap_bin = Path(LLAMA_SWAP_BIN)
+    llama_swap_bin = Path(CONTAINERPATH.LLAMA_SWAP)
     if not llama_swap_bin.is_file():
         raise SystemExit(f"llama-swap binary not found at {llama_swap_bin}")
     LOGGER.info(
         "starting llama-swap (%s mode, config=%s, listen=:%s)",
-        settings.mode,
+        settings.runtime.mode,
         config_path,
-        settings.container_port,
+        settings.runtime.container_port,
     )
     proc = subprocess.Popen(
         [
@@ -308,7 +310,7 @@ def serve(settings: Config) -> int:
             "-config",
             str(config_path),
             "-listen",
-            f"0.0.0.0:{settings.container_port}",
+            f"0.0.0.0:{settings.runtime.container_port}",
         ],
         start_new_session=True,
     )

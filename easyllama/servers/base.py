@@ -5,12 +5,14 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import field
 import os
 from pathlib import Path
 import signal
 import subprocess
 from typing import TYPE_CHECKING, Any, TypeVar
+
+from pydantic.dataclasses import dataclass
 
 from ..helpers.logger import LOG as APP_LOG
 
@@ -33,11 +35,8 @@ class BuildSource:
 
     label: str
     repo_attr: str
-    ref_attr: str
     repo_build_arg: str
     ref_build_arg: str
-    default_repo: str | None = None
-    default_ref: str | None = None
 
     def values(self, settings: Config) -> tuple[str, str]:
         """Perform the values operation.
@@ -47,15 +46,16 @@ class BuildSource:
 
         Returns:
             tuple[str, str]: The values result."""
-        repo = str(getattr(settings, self.repo_attr))
-        ref = str(getattr(settings, self.ref_attr))
-        repo_overridden = "EASYLLAMA_LLAMA_CPP_REPO" in os.environ
-        ref_overridden = "EASYLLAMA_LLAMA_CPP_REF" in os.environ
-        if self.repo_attr == "llama_cpp_repo" and not repo_overridden:
-            repo = self.default_repo or repo
-        if self.ref_attr == "llama_cpp_ref" and not ref_overridden:
-            ref = self.default_ref or ref
-        return repo, ref
+        from ..config import MODE
+
+        source = (
+            settings.modes[MODE.LUCEBOX].hub
+            if self.repo_attr == "lucebox_hub"
+            else settings.modes[MODE(self.repo_attr)].repo
+        )
+        if source is None:
+            raise ValueError(f"missing {self.repo_attr} source configuration")
+        return source.url, source.ref
 
     def summary(self, settings: Config) -> str:
         """Perform the summary operation.

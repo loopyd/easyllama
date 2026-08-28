@@ -2,7 +2,7 @@
 
 easy llama(cpp) exposes one `llama-swap` endpoint:
 
-- Base URL: `http://127.0.0.1:8080`
+- Base URL: `${EASYLLAMA_BASE_URL:-http://127.0.0.1:8080}`
 - Model discovery: `GET /v1/models`
 - Health check: `GET /health`
 
@@ -22,14 +22,14 @@ For setup and runtime flow, see [README.md](README.md).
 If API key protection is enabled, define auth header once:
 
 ```bash
-API_KEY="$(jq -r '.api_key // empty' auth.json)"
+API_KEY="$(jq -r '.credentials.api_key // empty' config.json 2>/dev/null)"
 AUTH=()
 if [[ -n "${API_KEY}" ]]; then
   AUTH=(-H "Authorization: Bearer ${API_KEY}")
 fi
 ```
 
-If `api_key` is absent, `AUTH` stays empty and examples still work.
+If `credentials.api_key` is absent, `AUTH` stays empty and examples still work. Set `EASYLLAMA_BASE_URL` when `runtime.host` or `runtime.host_port` differs from the defaults.
 
 ## Default model IDs
 
@@ -44,7 +44,7 @@ These stable IDs are exposed through `/v1/models`.
 
 | Mode | Default |
 | --- | --- |
-| `basic` | `unsloth/Qwen3.6-27B-GGUF:Q4_K_M` |
+| `llamacpp` | `unsloth/Qwen3.6-27B-GGUF:Q4_K_M` |
 | `turboquant` | `unsloth/Qwen3.6-27B-GGUF:UD-Q5_K_XL` |
 | `qwen` | `gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090` (RTX 5090-specific ModelOpt weights served by vLLM without speculative decoding, full 262,144-token context, FP8 KV cache, and thinking enabled) |
 | `spiritbuun` | target `unsloth/Qwen3.6-27B-GGUF:Q5_K_M`, draft `Ardenzard/Qwen3.6-27B-DFlash-GGUF:Qwen3.6-27B-DFlash-Q5_K_M.gguf` |
@@ -54,7 +54,7 @@ These stable IDs are exposed through `/v1/models`.
 
 Read this table first if choosing route by task or by mode.
 
-| Endpoint | `basic` | `turboquant` | `qwen` | `spiritbuun` | `lucebox` | Notes |
+| Endpoint | `llamacpp` | `turboquant` | `qwen` | `spiritbuun` | `lucebox` | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
 | `GET /health` | ✅ | ✅ | ✅ | ✅ | ✅ | Plain-text health check |
 | `GET /v1/models` | ✅ | ✅ | ✅ | ✅ | ✅ | Lists configured model IDs |
@@ -77,13 +77,13 @@ Use these after startup, rebuild, config edits, or backend changes.
 ### Health
 
 ```bash
-curl -sS http://127.0.0.1:8080/health
+curl -sS ${EASYLLAMA_BASE_URL:-http://127.0.0.1:8080}/health
 ```
 
 ### List models
 
 ```bash
-curl -sS "${AUTH[@]}" http://127.0.0.1:8080/v1/models | jq -r '.data[].id'
+curl -sS "${AUTH[@]}" ${EASYLLAMA_BASE_URL:-http://127.0.0.1:8080}/v1/models | jq -r '.data[].id'
 ```
 
 ### Chat completion
@@ -99,7 +99,7 @@ curl -sS "${AUTH[@]}" \
     "max_tokens": 16,
     "stream": false
   }' \
-  http://127.0.0.1:8080/v1/chat/completions | jq
+  ${EASYLLAMA_BASE_URL:-http://127.0.0.1:8080}/v1/chat/completions | jq
 ```
 
 ### Messages (`lucebox` only)
@@ -115,7 +115,7 @@ curl -sS "${AUTH[@]}" \
     "max_tokens": 16,
     "stream": false
   }' \
-  http://127.0.0.1:8080/v1/messages | jq
+  ${EASYLLAMA_BASE_URL:-http://127.0.0.1:8080}/v1/messages | jq
 ```
 
 ### Responses API
@@ -128,7 +128,7 @@ curl -sS "${AUTH[@]}" \
     "input": "Reply with exactly ok.",
     "max_output_tokens": 16
   }' \
-  http://127.0.0.1:8080/v1/responses | jq
+  ${EASYLLAMA_BASE_URL:-http://127.0.0.1:8080}/v1/responses | jq
 ```
 
 ### Embeddings
@@ -140,7 +140,7 @@ curl -sS "${AUTH[@]}" \
     "model": "qwen3-embeddings",
     "input": "local llama embeddings smoke test"
   }' \
-  http://127.0.0.1:8080/v1/embeddings | jq
+  ${EASYLLAMA_BASE_URL:-http://127.0.0.1:8080}/v1/embeddings | jq
 ```
 
 ## Which endpoint to use

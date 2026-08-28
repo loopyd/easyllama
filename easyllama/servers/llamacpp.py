@@ -1,4 +1,4 @@
-"""Implement the basic llama.cpp server mode."""
+"""Implement the plain llama.cpp server launcher."""
 
 from __future__ import annotations
 
@@ -8,63 +8,29 @@ from pathlib import Path
 from ..helpers.model import Model
 from .base import BuildSource, RuntimeModeMetadata, ServerBase, Spec, server_metadata
 
-DEFAULT_BIN = Path("/app/bin/llama-server-basic")
+DEFAULT_BIN = Path("/app/bin/llama-server-llamacpp")
 
 
 @server_metadata(
-    name="basic",
-    help="Run the plain llama-server launcher",
+    name="llamacpp",
+    help="Run the plain llama.cpp server launcher",
     runtime_modes=(
         RuntimeModeMetadata(
-            mode="basic",
-            docker_target="runtime-basic",
+            mode="llamacpp",
+            docker_target="runtime-llamacpp",
             build_sources=(
                 BuildSource(
-                    label="basic",
-                    repo_attr="llama_cpp_repo",
-                    ref_attr="llama_cpp_ref",
+                    label="llamacpp",
+                    repo_attr="llamacpp",
                     repo_build_arg="LLAMA_CPP_REPO",
                     ref_build_arg="LLAMA_CPP_REF",
-                    default_repo="https://github.com/Luce-Org/llama.cpp.git",
-                    default_ref="luce-dflash",
-                ),
-            ),
-        ),
-        RuntimeModeMetadata(
-            mode="turboquant",
-            docker_target="runtime-turboquant",
-            build_sources=(
-                BuildSource(
-                    label="turboquant",
-                    repo_attr="llama_cpp_repo",
-                    ref_attr="llama_cpp_ref",
-                    repo_build_arg="LLAMA_CPP_REPO",
-                    ref_build_arg="LLAMA_CPP_REF",
-                    default_repo="https://github.com/TheTom/llama-cpp-turboquant.git",
-                    default_ref="feature/turboquant-kv-cache",
-                ),
-            ),
-        ),
-        RuntimeModeMetadata(
-            mode="qwen",
-            docker_target="runtime-qwen",
-            backend="vllm",
-            build_sources=(
-                BuildSource(
-                    label="llamacpp-auxiliary",
-                    repo_attr="llama_cpp_repo",
-                    ref_attr="llama_cpp_ref",
-                    repo_build_arg="LLAMA_CPP_REPO",
-                    ref_build_arg="LLAMA_CPP_REF",
-                    default_repo="https://github.com/ggml-org/llama.cpp.git",
-                    default_ref="master",
                 ),
             ),
         ),
     ),
 )
-class BasicServer(ServerBase):
-    """Represent BasicServer state and behavior."""
+class LlamaCppServer(ServerBase):
+    """Run a plain llama.cpp server process."""
 
     def add_args(self, parser: argparse.ArgumentParser) -> None:
         """Add mode-specific command-line arguments.

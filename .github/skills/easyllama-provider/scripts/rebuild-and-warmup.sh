@@ -24,10 +24,9 @@ resolve_config_path() {
   MODE_NAME="${MODE}" "${PYTHON_BIN}" - <<'PY'
 import os
 
-from easyllama.config import load_settings, resolve_ls_config
+from easyllama.config import Config
 
-mode = os.environ["MODE_NAME"]
-print(resolve_ls_config(load_settings(mode_override=mode)))
+print(Config.load(mode_override=os.environ["MODE_NAME"]).resolve_ls_config())
 PY
 }
 

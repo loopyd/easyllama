@@ -53,7 +53,7 @@ def normalize_mode(value: str | None) -> str:
     """
     from ..servers import mode_names
 
-    selected = (value or "basic").strip().lower()
+    selected = (value or "llamacpp").strip().lower()
     if selected not in mode_names():
         allowed = ", ".join(mode_names())
         raise SystemExit(f"unsupported mode: {selected}; allowed: {allowed}")

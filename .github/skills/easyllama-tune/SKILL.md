@@ -1,12 +1,12 @@
 ---
 name: easyllama-tune
-description: 'Tune easyllama chat-model fit for a chosen mode: gpu layers, KV cache quantization, ctx-size, warmup 502/250 failures, and full-context ceilings.'
+description: 'Tune llama.cpp-backed easyllama chat-model fit: GPU layers, KV cache quantization, context size, startup OOMs, and fit ceilings.'
 argument-hint: 'mode=qwen, quants=q5_1, ctx=131072, max_gpu_layers=60'
 ---
 
 # Fit Tuning
 
-Tune the first chat-model alias in a chosen easyllama mode until the active config has a verified fit boundary.
+Tune the first llama.cpp-backed chat alias in a chosen easyllama mode until the active config has a verified fit boundary. The Qwen chat route uses vLLM, so GPU-layer/KV-cache tuning does not apply to that route; use another mode or tune Qwen's vLLM flags directly.
 
 ## Use When
 
@@ -26,18 +26,18 @@ Tune the first chat-model alias in a chosen easyllama mode until the active conf
 
 ## Rules
 
-- Treat `config/config.<mode>.yml` as the active scratchpad; do not sync `config/config.<mode>.yml.example` until a setting passes.
-- Before a tuning probe that starts or restarts a mode, stop any running easyllama containers so stale GPU consumers do not fake a lower fit ceiling.
+- Treat `config/config.<mode>.yml` as the active scratchpad; its path is derived from the mode unless top-level `llama_swap_override` is set. Do not sync the example until a setting passes.
+- Before a tuning probe, stop the selected managed mode stack and network through `./run.sh --mode <mode> stop`; do not stop unrelated containers by name prefix.
 - Use the real `./run.sh --mode <mode> restart && ./run.sh --mode <mode> warmup <chat-alias>` path as the acceptance check.
 - When lowering KV cache precision, prefer `q5_1` before `q5_0`.
 - Do not assume `q6_*` KV modes exist; check the runtime surface first.
-- After a config edit, upstream `502` or exit `250` usually means a fit boundary; inspect logs only when that is unclear.
+- Fail fast when the selected chat command does not expose the requested llama.cpp flag. After a supported config edit, upstream `502`, exit `250`, or CUDA OOM usually means a fit boundary.
 
 ## Procedure
 
 1. Check supported KV cache types.
    - Run [list-supported-cache-types.sh](./scripts/list-supported-cache-types.sh) with `--mode <mode>`.
-   - If the desired mode is unsupported, pick the least aggressive supported fallback.
+   - If the chat backend is vLLM or the desired cache type is unsupported, stop instead of mutating unrelated auxiliary routes.
 2. Record the anchor.
    - Use [set-chat-tuning.sh](./scripts/set-chat-tuning.sh) with `--mode <mode> --show`, or read the active config.
    - Keep one known-good combination before searching upward.
@@ -55,7 +55,7 @@ Tune the first chat-model alias in a chosen easyllama mode until the active conf
    - Warm only the discovered chat alias with `./run.sh --mode <mode> warmup <chat-alias>`.
    - If warmup fails with upstream `502` or `exit status 250`, treat it as a fit or startup OOM signal unless logs show another root cause.
    - Otherwise inspect logs to distinguish fit failure from transient or config parsing issues.
-   - If warmup succeeds, print live args to confirm the intended settings; use [probe-chat.sh](./scripts/probe-chat.sh) to combine validation, restart, warmup, and arg checking.
+   - If warmup succeeds, inspect aggregated mode logs to confirm startup; use [probe-chat.sh](./scripts/probe-chat.sh) to combine validation, restart, warmup, and log checking.
    - If searching for a boundary, update good or bad and repeat until the ceiling is found or the user stops.
    - If tuning to a specific setting, stop after the first pass.
    - If that setting fails, roll back to the last known good setting and stop.
@@ -71,7 +71,7 @@ Tune the first chat-model alias in a chosen easyllama mode until the active conf
 
 - `config/config.<mode>.yml` contains the chosen ctx size, GPU layer count, and KV cache type.
 - `./run.sh --mode <mode> restart && ./run.sh --mode <mode> warmup <chat-alias>` succeeds.
-- Live `llama-server-<mode>` args match the intended ctx size, layer count, and cache types.
+- Aggregated `./run.sh --mode <mode> logs --tail N` output shows the intended mode-specific server args, context, layer count, and cache types.
 - If the tuned setting is meant to become the repo default, `config/config.<mode>.yml.example` is synced and validates.
 - If KV cache precision changed, the user has either accepted the heuristic choice (`q5_1` before `q5_0`) or compared deterministic sample outputs.
 
@@ -79,7 +79,7 @@ Tune the first chat-model alias in a chosen easyllama mode until the active conf
 
 - [list-supported-cache-types.sh](./scripts/list-supported-cache-types.sh): show KV cache types accepted by the current server binary.
 - [set-chat-tuning.sh](./scripts/set-chat-tuning.sh): update qwen3-chat ctx size, gpu layers, fit mode, and KV cache types in a mode config.
-- [probe-chat.sh](./scripts/probe-chat.sh): validate config, stop running easyllama containers, restart the selected mode, warm the first chat alias under `models:`, and print live args on success.
+- [probe-chat.sh](./scripts/probe-chat.sh): validate config, stop the selected stack, restart it with dependencies and network, warm the first chat alias under `models:`, and print live args on success.
 - [search-max-gpu-layers.sh](./scripts/search-max-gpu-layers.sh): binary-search the highest passing layer count between known good and known failing bounds for a selected mode.
 - [snapshot-chat-sample.sh](./scripts/snapshot-chat-sample.sh): save a deterministic chat completion response for before-and-after cache-quant comparisons.
 - [compare-chat-samples.sh](./scripts/compare-chat-samples.sh): compare two saved snapshot JSON files and summarize content and format drift.

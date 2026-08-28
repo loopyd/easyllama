@@ -76,12 +76,12 @@ fi
 apply_updates() {
   local target_file="$1"
 
-  [[ -n "${layers}" ]] && set_macro_value "${target_file}" qwen3_chat_gpu_layers "${layers}"
-  [[ -n "${ctx_size}" ]] && set_macro_value "${target_file}" qwen3_chat_ctx_size "${ctx_size}"
-  [[ -n "${fit_mode}" ]] && set_macro_value "${target_file}" qwen3_chat_fit "${fit_mode}"
+  [[ -n "${layers}" ]] && set_chat_flag "${target_file}" --gpu-layers "${layers}"
+  [[ -n "${ctx_size}" ]] && set_chat_flag "${target_file}" --ctx-size "${ctx_size}"
+  [[ -n "${fit_mode}" ]] && set_chat_flag "${target_file}" --fit "${fit_mode}"
   if [[ -n "${cache_type}" ]]; then
-    set_macro_value "${target_file}" cache_type_k "${cache_type}"
-    set_macro_value "${target_file}" cache_type_v "${cache_type}"
+    set_chat_flag "${target_file}" --cache-type-k "${cache_type}"
+    set_chat_flag "${target_file}" --cache-type-v "${cache_type}"
   fi
 }
 

@@ -1,36 +1,22 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/mostlygeek/llama-swap/refs/heads/main/config-schema.json
-#
-# Copy this tracked template to config/config.turboquant.yml for local overrides.
-# Turboquant uses a llama.cpp fork with quantized KV-cache types.
-
-healthCheckTimeout: 1800
-logLevel: info
-sendLoadingState: false
-globalTTL: 0
-
-# Shared llama-server arguments.
 macros:
-  server_bin: "/opt/venv/bin/easyllama"
-  qwen3_chat_target_hf: "unsloth/Qwen3.6-27B-GGUF:UD-Q5_K_XL"
-  pi_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
-
+  qwen3_chat_target_hf: unsloth/Qwen3.6-27B-GGUF:UD-Q5_K_XL
+  pi_emb_hf_model: Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M
 models:
-  "qwen3-chat":
+  qwen3-chat:
     concurrencyLimit: 4
-    name: "Pi Qwen3 Chat 27B Turboquant"
-    description: "Primary chat/completions model with turboquant KV cache enabled"
+    name: Pi Qwen3 Chat 27B Turboquant
+    description: Primary chat/completions model with turboquant KV cache enabled
     filters:
       setParams:
-        reasoning: "off"
+        reasoning: 'off'
         chat_template_kwargs:
           tokenize: false
           add_generation_prompt: true
           enable_thinking: false
           preserve_thinking: false
-    cmd: |
-      ${server_bin}
+    cmd: '${server_bin}
       server
-      basic
+      turboquant
       --bin /app/bin/llama-server-turboquant
       --port ${PORT}
       -hf ${qwen3_chat_target_hf}
@@ -64,18 +50,14 @@ models:
       --poll 1
       --chat-template-kwargs {\"tokenize\":false,\"add_generation_prompt\":true,\"enable_thinking\":false,\"preserve_thinking\":false}
       --reasoning off
-
-    env:
-      - "HF_TOKEN=${env.HF_TOKEN}"
-
-  "qwen3-embeddings":
+      '
+  qwen3-embeddings:
     concurrencyLimit: 4
-    name: "Pi Qwen3 Embeddings 8B"
-    description: "Dense embedding model for vector search, RAG, similarity"
-    cmd: |
-      ${server_bin}
+    name: Pi Qwen3 Embeddings 8B
+    description: Dense embedding model for vector search, RAG, similarity
+    cmd: '${server_bin}
       server
-      basic
+      turboquant
       --bin /app/bin/llama-server-turboquant
       --port ${PORT}
       -hf ${pi_emb_hf_model}
@@ -90,6 +72,4 @@ models:
       --no-mmap
       --embedding
       --no-warmup
-
-    env:
-      - "HF_TOKEN=${env.HF_TOKEN}"
+      '

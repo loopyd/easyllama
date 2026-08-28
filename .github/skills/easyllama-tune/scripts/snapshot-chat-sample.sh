@@ -55,36 +55,26 @@ fi
 
 resolve_mode_config_paths
 
-BASE_URL="${BASE_URL:-http://localhost:8080/v1/chat/completions}"
+mapfile -t runtime_config < <(MODE_NAME="${MODE}" "${PYTHON_BIN}" - <<'PY'
+import os
+from easyllama.config import Config
+settings = Config.load(mode_override=os.environ["MODE_NAME"])
+print(f"{settings.listen_url()}/v1/chat/completions")
+print(settings.credentials.api_key or "")
+PY
+)
+BASE_URL="${BASE_URL:-${runtime_config[0]}}"
 TARGET_MODEL="${TARGET_MODEL:-$(resolve_chat_model_id "$(config_for_reads)")}"
 SEED_VALUE="${SEED_VALUE:-123}"
 MAX_TOKENS="${MAX_TOKENS:-256}"
 TEMPERATURE_VALUE="${TEMPERATURE_VALUE:-0}"
 TOP_P_VALUE="${TOP_P_VALUE:-1}"
-AUTH_FILE="${AUTH_FILE:-${EASYLLAMA_AUTH_FILE:-${REPO_ROOT}/auth.json}}"
-API_KEY_VALUE="${API_KEY:-${EASYLLAMA_API_KEY:-}}"
+API_KEY_VALUE="${API_KEY:-${EASYLLAMA_API_KEY:-${runtime_config[1]}}}"
 
 mkdir -p "$(dirname -- "${OUTPUT_PATH}")"
 
 payload_file="$(mktemp)"
 trap 'rm -f "${payload_file}"' EXIT
-
-if [[ -z "${API_KEY_VALUE}" && -f "${AUTH_FILE}" ]]; then
-  API_KEY_VALUE="$(AUTH_FILE="${AUTH_FILE}" "${PYTHON_BIN}" - <<'PY'
-import json
-import os
-from pathlib import Path
-
-path = Path(os.environ["AUTH_FILE"])
-try:
-    data = json.loads(path.read_text())
-except Exception:
-    data = {}
-
-print(data.get("api_key", ""))
-PY
-)"
-fi
 
 AUTH_ARGS=()
 if [[ -n "${API_KEY_VALUE}" ]]; then

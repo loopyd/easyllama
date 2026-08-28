@@ -5,6 +5,24 @@ Release history pulled from GitHub releases:
 
 Format follows Keep a Changelog style where possible, based on published release notes.
 
+## [Unreleased]
+
+## [v0.5.3] - 2026-08-28
+
+Patch release for mode-specific containers, centralized configuration, and the Qwen runtime refresh.
+
+### Changed
+
+- Replaced the generic `basic` server with dedicated llama.cpp and Qwen launchers, supervised mode-specific containers, private networks, health checks, and optional host publication.
+- Centralized JSON configuration for modes, credentials, Docker settings, and independent CPU/RAM/swap profiles with validated floors and host-capacity controls.
+- Split llama-swap, llama.cpp, vLLM, and LMCache builds into focused images with persistent BuildKit caches and bounded build parallelism.
+- Updated Qwen to vLLM 0.28 and LMCache 0.5.4, including CUDA IPC scheduling, a 16 GiB L1 cache, and a model-aligned 40,960-token embedding context.
+- Updated documentation, examples, project skills, scripts, and regression coverage for the new runtime architecture.
+
+### Fixed
+
+- Corrected vLLM compiler selection so clean CUDA builds do not pass compound ccache commands where executable paths are required.
+
 ## [v0.5.2] - 2026-08-17
 
 Qwen profile tuned for the RTX 5090-specific checkpoint.
@@ -66,7 +84,7 @@ Feature release adding the hybrid vLLM MTP runtime and simplifying shipped model
 
 ### Fixed
 
-- Host-side warmup prefetch now uses the Hugging Face token resolved from `auth.json`, while an explicit `HF_TOKEN` environment variable still takes precedence.
+- Host-side warmup prefetch now uses the Hugging Face token resolved from nested `config.json` credentials, while an explicit `HF_TOKEN` environment variable still takes precedence.
 
 ### Removed
 

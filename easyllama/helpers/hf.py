@@ -125,9 +125,14 @@ class HfProgress:
             )
         self._last_log, self._last_n = now, self.n
 
+    def set_postfix_str(self, *_: object, **__: object) -> None:
+        """Accept optional Hugging Face Xet transfer details."""
+
+    def refresh(self, *_: object, **__: object) -> None:
+        """Accept Hugging Face's final progress refresh."""
+
     def close(self) -> None:
         """Perform the close operation."""
-        pass
 
 
 class HuggingFace:

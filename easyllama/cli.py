@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import field
 
-from .config import RUNTIME_CONTAINER, Config
+from pydantic.dataclasses import dataclass
+
+from .config import IMAGE, RUNTIME, Config
 from .helpers.docker import DockerRuntime
 from .helpers.logger import LOG as APP_LOG
 from .runtime import serve, warmup_models
@@ -98,8 +100,10 @@ def _build_handler(args: argparse.Namespace, extra_args: list[str]) -> int:
         SystemExit: If the build handler operation cannot be completed."""
     if extra_args:
         raise SystemExit(f"unexpected args for build: {' '.join(extra_args)}")
-    settings = Config(mode_override=args.mode)
-    return DockerRuntime(settings).build_image()
+    settings = Config.load(
+        config_file=args.config_file, mode_override=args.mode, host_override=args.host
+    )
+    return DockerRuntime(settings).build_image(IMAGE(args.type) if args.type else None)
 
 
 def _start_handler(args: argparse.Namespace, extra_args: list[str]) -> int:
@@ -116,7 +120,9 @@ def _start_handler(args: argparse.Namespace, extra_args: list[str]) -> int:
         SystemExit: If the start handler operation cannot be completed."""
     if extra_args:
         raise SystemExit(f"unexpected args for start: {' '.join(extra_args)}")
-    settings = Config(mode_override=args.mode)
+    settings = Config.load(
+        config_file=args.config_file, mode_override=args.mode, host_override=args.host
+    )
     return DockerRuntime(settings).run_container()
 
 
@@ -129,7 +135,9 @@ def _warmup_handler(args: argparse.Namespace, extra_args: list[str]) -> int:
 
     Returns:
         int: The warmup handler result."""
-    settings = Config(mode_override=args.mode)
+    settings = Config.load(
+        config_file=args.config_file, mode_override=args.mode, host_override=args.host
+    )
     return warmup_models(settings, list(args.models) + extra_args)
 
 
@@ -147,7 +155,9 @@ def _stop_handler(args: argparse.Namespace, extra_args: list[str]) -> int:
         SystemExit: If the stop handler operation cannot be completed."""
     if extra_args:
         raise SystemExit(f"unexpected args for stop: {' '.join(extra_args)}")
-    settings = Config(mode_override=args.mode)
+    settings = Config.load(
+        config_file=args.config_file, mode_override=args.mode, host_override=args.host
+    )
     return DockerRuntime(settings).stop_container()
 
 
@@ -165,7 +175,9 @@ def _restart_handler(args: argparse.Namespace, extra_args: list[str]) -> int:
         SystemExit: If the restart handler operation cannot be completed."""
     if extra_args:
         raise SystemExit(f"unexpected args for restart: {' '.join(extra_args)}")
-    settings = Config(mode_override=args.mode)
+    settings = Config.load(
+        config_file=args.config_file, mode_override=args.mode, host_override=args.host
+    )
     return DockerRuntime(settings).restart_container()
 
 
@@ -183,7 +195,9 @@ def _logs_handler(args: argparse.Namespace, extra_args: list[str]) -> int:
         SystemExit: If the logs handler operation cannot be completed."""
     if extra_args:
         raise SystemExit(f"unexpected args for logs: {' '.join(extra_args)}")
-    settings = Config(mode_override=args.mode)
+    settings = Config.load(
+        config_file=args.config_file, mode_override=args.mode, host_override=args.host
+    )
     return DockerRuntime(settings).print_logs(tail=args.tail)
 
 
@@ -201,7 +215,9 @@ def _status_handler(args: argparse.Namespace, extra_args: list[str]) -> int:
         SystemExit: If the status handler operation cannot be completed."""
     if extra_args:
         raise SystemExit(f"unexpected args for status: {' '.join(extra_args)}")
-    settings = Config(mode_override=args.mode)
+    settings = Config.load(
+        config_file=args.config_file, mode_override=args.mode, host_override=args.host
+    )
     return DockerRuntime(settings).status()
 
 
@@ -219,7 +235,9 @@ def _clean_handler(args: argparse.Namespace, extra_args: list[str]) -> int:
         SystemExit: If the clean handler operation cannot be completed."""
     if extra_args:
         raise SystemExit(f"unexpected args for clean: {' '.join(extra_args)}")
-    settings = Config(mode_override=args.mode)
+    settings = Config.load(
+        config_file=args.config_file, mode_override=args.mode, host_override=args.host
+    )
     return DockerRuntime(settings).clean(all_images=args.all_images)
 
 
@@ -237,7 +255,12 @@ def _serve_handler(args: argparse.Namespace, extra_args: list[str]) -> int:
         SystemExit: If the serve handler operation cannot be completed."""
     if extra_args:
         raise SystemExit(f"unexpected args for serve: {' '.join(extra_args)}")
-    settings = Config(mode_override=args.mode, runtime_mode_override=RUNTIME_CONTAINER)
+    settings = Config.load(
+        config_file=args.config_file,
+        mode_override=args.mode,
+        runtime_mode_override=RUNTIME.CONTAINER,
+        host_override=args.host,
+    )
     return serve(settings)
 
 
@@ -253,6 +276,11 @@ def _help_handler(args: argparse.Namespace, extra_args: list[str]) -> int:
     parser = build_parser()
     parser.print_help()
     return 0
+
+
+def _build_config(parser: argparse.ArgumentParser) -> None:
+    """Configure image-role selection for Docker builds."""
+    parser.add_argument("--type", choices=IMAGE, default=None)
 
 
 def _warmup_config(parser: argparse.ArgumentParser) -> None:
@@ -286,7 +314,10 @@ def command_tree() -> tuple[CommandNode, ...]:
         tuple[CommandNode, ...]: The command tree result."""
     return (
         CommandNode(
-            name="build", help="Build the mode-specific Docker image", handler=_build_handler
+            name="build",
+            help="Build a mode/type-specific Docker image",
+            handler=_build_handler,
+            configure_parser=_build_config,
         ),
         CommandNode(name="start", help="Start the selected mode container", handler=_start_handler),
         CommandNode(
@@ -310,7 +341,7 @@ def command_tree() -> tuple[CommandNode, ...]:
         CommandNode(name="status", help="Show runtime container status", handler=_status_handler),
         CommandNode(
             name="clean",
-            help="Remove the runtime container and image",
+            help="Remove the runtime container, image, and all host cache contents",
             handler=_clean_handler,
             configure_parser=_clean_config,
         ),
@@ -358,6 +389,15 @@ def build_parser() -> argparse.ArgumentParser:
         argparse.ArgumentParser: The build parser result."""
     parser = argparse.ArgumentParser(prog="easyllama")
     parser.add_argument("--mode", choices=mode_names(), default=None)
+    parser.add_argument(
+        "--config-file",
+        help="Nested JSON configuration file (default: config.json when present)",
+    )
+    parser.add_argument(
+        "--host",
+        default=None,
+        help="IPv4, IPv6, or hostname used to publish the API port (default: 127.0.0.1)",
+    )
     parser.add_argument("--verbosity", choices=["debug", "info", "warning", "error"], default=None)
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--no-color", action="store_true")

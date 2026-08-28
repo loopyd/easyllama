@@ -1,32 +1,19 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/mostlygeek/llama-swap/refs/heads/main/config-schema.json
-#
-# Local runtime configuration template for Qwen mode.
-# Copy this file to config/config.qwen.yml for local edits and overrides.
-# Qwen3.8 RTX 5090 NVFP4 chat uses raw ModelOpt weights; auxiliary GGUF routes remain on llama.cpp.
-
-healthCheckTimeout: 1800
-logLevel: info
-sendLoadingState: false
-globalTTL: 0
-
 hooks:
   on_startup:
     preload:
-      - "qwen3-chat"
-
+    - qwen3-chat
 macros:
-  server_bin: "/opt/venv/bin/easyllama"
-  vllm_wrapper_bin: "/app/bin/vllm-wrapper"
-  vllm_bin: "/opt/venv/bin/vllm"
-  qwen3_chat_target_hf: "gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090"
-  pi_emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
+  vllm_wrapper_bin: /app/bin/vllm-wrapper
+  vllm_bin: /opt/venv/bin/vllm
+  qwen3_chat_target_hf: gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090
+  pi_emb_hf_model: Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M
 models:
-  "qwen3-chat":
+  qwen3-chat:
     concurrencyLimit: 4
-    name: "Qwen3.8 Chat 27B NVFP4 RTX 5090"
-    description: "Primary thinking/tool-use model; RTX 5090 ModelOpt NVFP4 weights served by vLLM"
-    cmd: |
-      ${vllm_wrapper_bin}
+    name: Qwen3.8 Chat 27B NVFP4 RTX 5090
+    description: Primary thinking/tool-use model; RTX 5090 ModelOpt NVFP4 weights
+      served by vLLM
+    cmd: '${vllm_wrapper_bin}
       serve
       --vllm-url http://127.0.0.1:18000
       --listen :${PORT}
@@ -51,37 +38,37 @@ models:
       --enable-log-requests
       --log-error-stack
       --chat-template /chat_template/qwen3.8.jinja
-      --default-chat-template-kwargs '{"enable_thinking":true,"preserve_thinking":false}'
+      --default-chat-template-kwargs ''{"enable_thinking":true,"preserve_thinking":false}''
       --reasoning-parser qwen3
       --enable-auto-tool-choice
       --tool-call-parser qwen3_xml
       --enable-sleep-mode
       --enable-chunked-prefill
-    cmdStop: |
-      ${vllm_wrapper_bin}
+      '
+    cmdStop: '${vllm_wrapper_bin}
       sleep
       --vllm-url http://127.0.0.1:18000
       --sleep-level 2
       --stop-pid ${PID}
+      '
     env:
-      - "HF_TOKEN=${env.HF_TOKEN}"
-      - "VLLM_SERVER_DEV_MODE=1"
-      - "VLLM_LOGGING_LEVEL=INFO"
-      - "PYTHONFAULTHANDLER=1"
-
-  "qwen3-embeddings":
+    - VLLM_SERVER_DEV_MODE=1
+    - VLLM_LOGGING_LEVEL=INFO
+    - PYTHONFAULTHANDLER=1
+    - MAX_JOBS=2
+    - NVCC_THREADS=1
+  qwen3-embeddings:
     concurrencyLimit: 4
-    name: "Qwen3 Embeddings 8B"
-    description: "Dense embedding model for vector search, RAG, similarity"
-    cmd: |
-      ${server_bin}
+    name: Qwen3 Embeddings 8B
+    description: Dense embedding model for vector search, RAG, similarity
+    cmd: '${server_bin}
       server
-      basic
+      qwen
       --bin /app/bin/llama-server-qwen
       --port ${PORT}
       -hf ${pi_emb_hf_model}
-      --ctx-size 262144
-      --batch-size 2048
+      --ctx-size 40960
+      --batch-size 1024
       --ubatch-size 1024
       --parallel 1
       --flash-attn on
@@ -90,6 +77,5 @@ models:
       --no-mmap
       --embedding
       --no-warmup
+      '
     cmdStop: /bin/kill -TERM ${PID}
-    env:
-      - "HF_TOKEN=${env.HF_TOKEN}"

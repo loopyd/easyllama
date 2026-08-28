@@ -3,67 +3,483 @@
 from __future__ import annotations
 
 from contextlib import suppress
-from dataclasses import dataclass
+from enum import IntEnum, StrEnum
+from ipaddress import ip_address
 import json
 import os
 from pathlib import Path
 import re
 import tempfile
-from typing import ClassVar
+from typing import Any, cast
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PositiveInt,
+    ValidationInfo,
+    field_serializer,
+    field_validator,
+)
 
 from .helpers.common import (
     absolute_path,
     detect_timezone,
     image_name_for_mode,
-    load_pyproject,
     normalize_mode,
     project_root,
 )
 from .helpers.hf import HuggingFace
 from .helpers.http import Http
 from .helpers.logger import LOG as APP_LOG
-from .servers import mode_names
 
 LOGGER = APP_LOG.get(__name__)
-RUNTIME_HOST = "host"
-RUNTIME_CONTAINER = "container"
-MODE_BASIC = "basic"
-MODE_TURBOQUANT = "turboquant"
-MODE_QWEN = "qwen"
-MODE_SPIRITBUUN = "spiritbuun"
-MODE_LUCEBOX = "lucebox"
-MODELS_DIR_CONTAINER = "/root/.cache/huggingface/hub"
-CHAT_TEMPLATE_DIR_CONTAINER = "/chat_template"
-MMPROJ_DIR_CONTAINER = "/mmproj"
-LLAMA_SWAP_BIN = "/app/bin/llama-swap"
 
 
-@dataclass(frozen=True)
-class ModeConfig:
-    """Pair active and example configuration paths.
+class RUNTIME(StrEnum):
+    """Supported execution environments."""
 
-    Attributes:
-        active: The active (Path).
-        example: The example (Path)."""
-
-    active: Path
-    example: Path
+    HOST = "host"
+    CONTAINER = "container"
 
 
-@dataclass(frozen=True)
-class ResolvedAuth:
-    """Hold resolved external-service credentials.
+class MODE(StrEnum):
+    """Supported server modes."""
 
-    Attributes:
-        hf_token: The hf token (str | None).
-        api_key: The api key (str | None)."""
-
-    hf_token: str | None
-    api_key: str | None
+    LLAMACPP = "llamacpp"
+    TURBOQUANT = "turboquant"
+    QWEN = "qwen"
+    SPIRITBUUN = "spiritbuun"
+    LUCEBOX = "lucebox"
 
 
-@dataclass(init=False)
-class Config:
+class IMAGE(StrEnum):
+    """Supported isolated Docker image roles."""
+
+    LLAMASWAP = "llamaswap"
+    VLLM = "vllm"
+    LLAMACPP = "llamacpp"
+    LMCACHE = "lmcache"
+
+
+class CPU_WEIGHT(IntEnum):
+    """Relative CPU allocation within the host's 75% container budget."""
+
+    LOW = 1
+    MEDIUM = 2
+    HIGH = 3
+    XHIGH = 4
+
+    @classmethod
+    def from_string(cls, value: str | CPU_WEIGHT) -> CPU_WEIGHT:
+        """Resolve a JSON profile name."""
+        if isinstance(value, cls):
+            return value
+        try:
+            return cls[str(value).strip().upper()]
+        except KeyError as error:
+            raise ValueError(f"invalid CPU weight: {value}") from error
+
+    def allocate(self, available: int, floor: int | None = None) -> int:
+        """Return weighted CPUs, subject to the configured profile floor."""
+        budget = max(1, int(available * 0.75))
+        floors = {
+            CPU_WEIGHT.LOW: 2,
+            CPU_WEIGHT.MEDIUM: 4,
+            CPU_WEIGHT.HIGH: 8,
+            CPU_WEIGHT.XHIGH: 16,
+        }
+        floor = floors[self] if floor is None else floor
+        divisors = {
+            CPU_WEIGHT.LOW: 12,
+            CPU_WEIGHT.MEDIUM: 3,
+            CPU_WEIGHT.HIGH: 1.5,
+            CPU_WEIGHT.XHIGH: 1,
+        }
+        return max(floor, int(budget / divisors[self]))
+
+
+class RAM_WEIGHT(IntEnum):
+    """Relative RAM allocation while reserving at least 16 GiB for the host."""
+
+    LOW = 1
+    MEDIUM = 2
+    HIGH = 3
+    XHIGH = 4
+
+    @classmethod
+    def from_string(cls, value: str | RAM_WEIGHT) -> RAM_WEIGHT:
+        """Resolve a JSON profile name."""
+        if isinstance(value, cls):
+            return value
+        try:
+            return cls[str(value).strip().upper()]
+        except KeyError as error:
+            raise ValueError(f"invalid RAM weight: {value}") from error
+
+    def allocate(self, available_gib: float, floor: int | None = None) -> int:
+        """Return weighted RAM bytes, subject to the configured profile floor."""
+        gib = 1024**3
+        budget = max(0, min(available_gib * 0.75, available_gib - 16))
+        floors = {
+            RAM_WEIGHT.LOW: 8,
+            RAM_WEIGHT.MEDIUM: 16,
+            RAM_WEIGHT.HIGH: 32,
+            RAM_WEIGHT.XHIGH: 64,
+        }
+        floor = floors[self] if floor is None else floor
+        divisors = {
+            RAM_WEIGHT.LOW: 12,
+            RAM_WEIGHT.MEDIUM: 3,
+            RAM_WEIGHT.HIGH: 1.5,
+            RAM_WEIGHT.XHIGH: 1,
+        }
+        return int(max(floor, budget / divisors[self]) * gib)
+
+
+class SWAP_WEIGHT(IntEnum):
+    """Relative swap allocation independent of RAM allocation."""
+
+    LOW = 1
+    MEDIUM = 2
+    HIGH = 3
+    XHIGH = 4
+
+    @classmethod
+    def from_string(cls, value: str | SWAP_WEIGHT) -> SWAP_WEIGHT:
+        """Resolve a JSON profile name."""
+        if isinstance(value, cls):
+            return value
+        try:
+            return cls[str(value).strip().upper()]
+        except KeyError as error:
+            raise ValueError(f"invalid swap weight: {value}") from error
+
+    def allocate(self, available_gib: float, floor: int | None = None) -> int:
+        """Return weighted swap bytes, subject to the configured profile floor."""
+        gib = 1024**3
+        floors = {
+            SWAP_WEIGHT.LOW: 4,
+            SWAP_WEIGHT.MEDIUM: 8,
+            SWAP_WEIGHT.HIGH: 16,
+            SWAP_WEIGHT.XHIGH: 32,
+        }
+        floor = floors[self] if floor is None else floor
+        return int(max(floor, available_gib * int(self) / int(SWAP_WEIGHT.XHIGH)) * gib)
+
+
+class CONTAINERPATH(StrEnum):
+    """Paths shared with the runtime container."""
+
+    ROOT_CACHE = "/root/.cache"
+    PKG_CACHE = "/var/cache/apt"
+    PYTHON_CACHE = f"{ROOT_CACHE}/pip"
+    MODELS = f"{ROOT_CACHE}/huggingface/hub"
+    CHAT_TEMPLATE = "/chat_template"
+    MMPROJ = "/mmproj"
+    LLAMA_SWAP = "/app/bin/llama-swap"
+
+
+class DataModel(BaseModel):
+    """Serializable, validated, immutable configuration data."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", validate_default=True)
+
+
+def config_field(default: object, *, env: str | None = None) -> Any:
+    """Declare the matching environment variable suffix for a configuration field."""
+    return Field(default, json_schema_extra={"env": env} if env else {})
+
+
+def _merge(target: dict[str, Any], source: dict[str, Any]) -> None:
+    """Recursively merge JSON configuration into defaults."""
+    for key, value in source.items():
+        if isinstance(value, dict) and isinstance(target.get(key), dict):
+            _merge(target[key], value)
+        else:
+            target[key] = value
+
+
+def _apply_env(model: type[DataModel], values: dict[str, Any]) -> None:
+    """Recursively apply field-declared EASYLLAMA environment overrides."""
+    for name, field in model.model_fields.items():
+        annotation = field.annotation
+        if isinstance(annotation, type) and issubclass(annotation, DataModel):
+            _apply_env(annotation, values.setdefault(name, {}))
+            continue
+        meta = cast(dict[str, object], field.json_schema_extra or {})
+        env_name = meta.get("env")
+        if env_name and (value := os.environ.get(f"EASYLLAMA_{env_name}")) is not None:
+            values[name] = value
+
+
+class ProfileValues(DataModel):
+    """Configurable floors for the four resource weights."""
+
+    low: PositiveInt
+    medium: PositiveInt
+    high: PositiveInt
+    xhigh: PositiveInt
+
+    def floor(self, weight: IntEnum) -> int:
+        """Return the configured floor for a weight."""
+        return cast(int, getattr(self, weight.name.lower()))
+
+
+class CPUProfiles(ProfileValues):
+    low: PositiveInt = 2
+    medium: PositiveInt = 4
+    high: PositiveInt = 8
+    xhigh: PositiveInt = 16
+
+    @field_validator("low", "medium", "high", "xhigh")
+    @classmethod
+    def validate_floor(cls, value: int, info: ValidationInfo) -> int:
+        minimum = {"low": 2, "medium": 4, "high": 8, "xhigh": 16}[cast(str, info.field_name)]
+        if value < minimum:
+            raise ValueError(f"{info.field_name} CPU floor must be at least {minimum}")
+        return value
+
+
+class RAMProfiles(ProfileValues):
+    low: PositiveInt = 8
+    medium: PositiveInt = 16
+    high: PositiveInt = 32
+    xhigh: PositiveInt = 64
+
+    @field_validator("low", "medium", "high", "xhigh")
+    @classmethod
+    def validate_floor(cls, value: int, info: ValidationInfo) -> int:
+        minimum = {"low": 8, "medium": 16, "high": 32, "xhigh": 64}[cast(str, info.field_name)]
+        if value < minimum:
+            raise ValueError(f"{info.field_name} RAM floor must be at least {minimum} GiB")
+        return value
+
+
+class SwapProfiles(ProfileValues):
+    low: PositiveInt = 4
+    medium: PositiveInt = 8
+    high: PositiveInt = 16
+    xhigh: PositiveInt = 32
+
+    @field_validator("low", "medium", "high", "xhigh")
+    @classmethod
+    def validate_floor(cls, value: int, info: ValidationInfo) -> int:
+        minimum = {"low": 4, "medium": 8, "high": 16, "xhigh": 32}[cast(str, info.field_name)]
+        if value < minimum:
+            raise ValueError(f"{info.field_name} swap floor must be at least {minimum} GiB")
+        return value
+
+
+class ProfilesConfig(DataModel):
+    """Configurable CPU, RAM, and swap floors."""
+
+    cpu: CPUProfiles = CPUProfiles()
+    ram: RAMProfiles = RAMProfiles()
+    swap: SwapProfiles = SwapProfiles()
+
+
+class HostResources(DataModel):
+    """Configured host capacity available to containers."""
+
+    cpus: PositiveInt = config_field(os.cpu_count() or 1, env="AVAILABLE_CPUS")
+    ram_gib: float | None = config_field(None, env="AVAILABLE_RAM_GIB")
+    swap_gib: float | None = config_field(None, env="AVAILABLE_SWAP_GIB")
+
+    @field_validator("ram_gib", "swap_gib")
+    @classmethod
+    def positive_capacity(cls, value: float | None) -> float | None:
+        if value is not None and value < 0:
+            raise ValueError("resource capacity cannot be negative")
+        return value
+
+
+class HardwareProfile(DataModel):
+    """Independent container CPU, RAM, and swap profiles."""
+
+    cpu: CPU_WEIGHT
+    ram: RAM_WEIGHT
+    swap: SWAP_WEIGHT
+
+    @field_validator("cpu", mode="before")
+    @classmethod
+    def parse_cpu(cls, value: object) -> CPU_WEIGHT:
+        return CPU_WEIGHT.from_string(cast(str | CPU_WEIGHT, value))
+
+    @field_validator("ram", mode="before")
+    @classmethod
+    def parse_ram(cls, value: object) -> RAM_WEIGHT:
+        return RAM_WEIGHT.from_string(cast(str | RAM_WEIGHT, value))
+
+    @field_validator("swap", mode="before")
+    @classmethod
+    def parse_swap(cls, value: object) -> SWAP_WEIGHT:
+        return SWAP_WEIGHT.from_string(cast(str | SWAP_WEIGHT, value))
+
+    @field_serializer("cpu", "ram", "swap")
+    def serialize_weight(self, value: IntEnum) -> str:
+        return value.name.lower()
+
+
+class ResourcesConfig(DataModel):
+    """Host capacity, profile floors, and service-role assignments."""
+
+    host: HostResources = HostResources()
+    profiles: ProfilesConfig = ProfilesConfig()
+    roles: dict[IMAGE, HardwareProfile]
+
+    def profile(self, image: IMAGE) -> HardwareProfile:
+        """Return the configured profile for an image role."""
+        try:
+            return self.roles[image]
+        except KeyError as error:
+            raise ValueError(f"missing resource profile for {image}") from error
+
+
+class CredentialsConfig(DataModel):
+    """External-service credentials."""
+
+    hf_token: str | None = config_field(None, env="HF_TOKEN")
+    api_key: str | None = config_field(None, env="API_KEY")
+
+
+class ConfigDirs(DataModel):
+    """Project paths."""
+
+    root: Path = config_field(".", env="ROOT")
+    models: Path = config_field("cache/models", env="MODELS_DIR")
+    root_cache: Path = config_field("cache/root", env="ROOT_CACHE_DIR")
+    pkg_cache: Path = config_field("cache/pkg", env="PKG_CACHE_DIR")
+    python_cache: Path = config_field("cache/python", env="PYTHON_CACHE_DIR")
+    mmproj: Path = config_field("mmproj", env="MMPROJ_DIR")
+    chat_template: Path = config_field("chat_template", env="CHAT_TEMPLATE_DIR")
+    runtime: Path = config_field(".runtime", env="RUNTIME_DIR")
+
+    @field_validator("*", mode="after")
+    @classmethod
+    def absolute_paths(cls, value: Path, info: ValidationInfo) -> Path:
+        """Resolve all project paths against the configured root."""
+        if info.field_name == "root":
+            return value.expanduser().resolve()
+        return absolute_path(info.data.get("root", project_root()), str(value))
+
+
+class ConfigRepo(DataModel):
+    """Source repository URL and revision."""
+
+    url: str
+    ref: str
+
+
+class ModeSettings(DataModel):
+    """Repository and service roles for one runtime mode."""
+
+    repo: ConfigRepo
+    services: tuple[IMAGE, ...]
+    hub: ConfigRepo | None = None
+
+
+class LMCacheConfig(DataModel):
+    """LMCache server settings."""
+
+    chunk_size: PositiveInt = config_field(1600, env="LMCACHE_CHUNK_SIZE")
+    l1_size_gb: PositiveInt = config_field(16, env="LMCACHE_L1_SIZE_GB")
+
+
+class RuntimeConfig(DataModel):
+    """Server process and network settings."""
+
+    environment: RUNTIME = config_field(RUNTIME.HOST, env="RUNTIME_MODE")
+    mode: MODE = config_field(MODE.LLAMACPP, env="MODE")
+    host: str = config_field("127.0.0.1", env="HOST")
+    host_port: int = config_field(8080, env="HOST_PORT")
+    container_port: int = config_field(8080, env="CONTAINER_PORT")
+    pids_limit: PositiveInt = config_field(256, env="PIDS_LIMIT")
+
+    @field_validator("environment", mode="before")
+    @classmethod
+    def validate_environment(cls, value: object) -> RUNTIME:
+        from .helpers.docker import detect_runtime_mode
+
+        return detect_runtime_mode(str(value) if value is not None else None)
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def validate_mode(cls, value: object) -> MODE:
+        return MODE(normalize_mode(str(value) if value is not None else None))
+
+    @field_validator("host", mode="before")
+    @classmethod
+    def validate_host(cls, value: object) -> str:
+        """Normalize an IPv4, IPv6, or RFC-compliant hostname."""
+        host = str(value).strip()
+        try:
+            return ip_address(host.removeprefix("[").removesuffix("]")).compressed
+        except ValueError:
+            pass
+        try:
+            ascii_host = host.rstrip(".").encode("idna").decode("ascii").lower()
+        except UnicodeError as error:
+            raise ValueError("host must be a valid IPv4, IPv6, or hostname") from error
+        labels = ascii_host.split(".")
+        if (
+            not ascii_host
+            or len(ascii_host) > 253
+            or any(
+                len(label) > 63 or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", label)
+                for label in labels
+            )
+        ):
+            raise ValueError("host must be a valid IPv4, IPv6, or hostname")
+        return ascii_host
+
+    @field_validator("host_port", "container_port")
+    @classmethod
+    def validate_port(cls, value: int) -> int:
+        if not 1 <= value <= 65535:
+            raise ValueError("port must be between 1 and 65535")
+        return value
+
+
+class CudaConfig(DataModel):
+    """CUDA architecture build settings."""
+
+    default: str = config_field("120", env="DEFAULT_CUDA_ARCHITECTURES")
+    cmake: str = config_field("auto", env="CMAKE_CUDA_ARCHITECTURES")
+
+
+class DockerConfig(DataModel):
+    """Docker image, container, and build settings."""
+
+    image_name: str = config_field("easyllama", env="IMAGE_NAME")
+    image_tag: str = "cuda13"
+    container_name: str = config_field("easyllama-server-swap", env="CONTAINER_NAME")
+    cuda: CudaConfig = CudaConfig()
+
+
+class LocaleConfig(DataModel):
+    """Host locale forwarded to containers."""
+
+    timezone: str = config_field("UTC", env="HOST_TZ")
+    lang: str = config_field("C.UTF-8", env="HOST_LANG")
+    lc_all: str = config_field("C.UTF-8", env="HOST_LC_ALL")
+
+
+class WarmupConfig(DataModel):
+    """Model warmup polling settings."""
+
+    timeout: PositiveInt = config_field(1800, env="WARMUP_TIMEOUT")
+    poll_interval: float = config_field(2.0, env="WARMUP_POLL_INTERVAL")
+
+    @field_validator("poll_interval")
+    @classmethod
+    def positive_poll_interval(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("poll interval must be positive")
+        return value
+
+
+class Config(DataModel):
     """Store and operate on process-wide easyllama configuration.
 
     Attributes:
@@ -72,242 +488,157 @@ class Config:
         mode: The mode (str).
         image_name: The image name (str).
         container_name: The container name (str).
+        host: The host bind address (str).
         host_port: The host port (int).
         container_port: The container port (int).
         pids_limit: The pids limit (int).
-        models_dir: The models dir (Path).
+        models_dir: The models cache dir (Path).
+        root_cache_dir: The root cache dir (Path).
+        pkg_cache_dir: The package-manager cache dir (Path).
+        python_cache_dir: The Python cache dir (Path).
         mmproj_dir: The mmproj dir (Path).
         chat_template_dir: The chat template dir (Path).
         auth_file: The auth file (Path).
         auth_example_file: The auth example file (Path).
         runtime_dir: The runtime dir (Path).
         config_override: The config override (Path | None).
-        configs: The configs (dict[str, ModeConfig]).
-        default_cuda_architectures: The default cuda architectures (str).
-        cmake_cuda_architectures: The cmake cuda architectures (str).
-        llama_cpp_repo: The llama cpp repo (str).
-        llama_cpp_ref: The llama cpp ref (str).
-        lucebox_hub_repo: The lucebox hub repo (str).
-        lucebox_hub_ref: The lucebox hub ref (str).
+        modes: Mode repositories and service roles.
+        resources: Host capacity and resource profiles.
         host_tz: The host tz (str).
         host_lang: The host lang (str).
         host_lc_all: The host lc all (str).
     _instance: The instance."""
 
-    _instance: ClassVar[Config | None] = None
+    dirs: ConfigDirs
+    runtime: RuntimeConfig
+    docker: DockerConfig
+    resources: ResourcesConfig
+    modes: dict[MODE, ModeSettings]
+    locale: LocaleConfig
+    lmcache: LMCacheConfig
+    llama_swap_override: Path | None = config_field(None, env="LS_CONFIG_FILE")
+    warmup: WarmupConfig = WarmupConfig()
+    credentials: CredentialsConfig = CredentialsConfig()
 
-    root_dir: Path
-    runtime_mode: str
-    mode: str
-    image_name: str
-    container_name: str
-    host_port: int
-    container_port: int
-    pids_limit: int
-    models_dir: Path
-    mmproj_dir: Path
-    chat_template_dir: Path
-    auth_file: Path
-    auth_example_file: Path
-    runtime_dir: Path
-    config_override: Path | None
-    configs: dict[str, ModeConfig]
-    default_cuda_architectures: str
-    cmake_cuda_architectures: str
-    llama_cpp_repo: str
-    llama_cpp_ref: str
-    lucebox_hub_repo: str
-    lucebox_hub_ref: str
-    host_tz: str
-    host_lang: str
-    host_lc_all: str
+    @field_validator("llama_swap_override", mode="after")
+    @classmethod
+    def resolve_override(cls, value: Path | None, info: ValidationInfo) -> Path | None:
+        root = (info.context or {}).get("root")
+        return absolute_path(Path(root), str(value)) if value and root else value
 
-    def __new__(
+    @classmethod
+    def load(
         cls,
         *,
-        mode_override: str | None = None,
-        runtime_mode_override: str | None = None,
+        config_file: str | Path | None = None,
+        mode_override: MODE | str | None = None,
+        runtime_mode_override: RUNTIME | str | None = None,
+        host_override: str | None = None,
     ) -> Config:
-        """Return the process-wide singleton instance.
-
-        Args:
-            mode_override: The mode override.
-            runtime_mode_override: The runtime mode override.
-
-        Returns:
-            Config: The new result."""
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
-    def __init__(
-        self,
-        *,
-        mode_override: str | None = None,
-        runtime_mode_override: str | None = None,
-    ) -> None:
-        """Initialize the instance.
-
-        Args:
-            mode_override: The mode override.
-            runtime_mode_override: The runtime mode override."""
-        self.load(mode_override=mode_override, runtime_mode_override=runtime_mode_override)
-
-    @staticmethod
-    def env(name: str, default: str | None = None) -> str | None:
-        """Read an EASYLLAMA-prefixed environment setting.
-
-        Args:
-            name: The name.
-            default: The default.
-
-        Returns:
-            str | None: The env result."""
-        return os.environ.get(f"EASYLLAMA_{name}", default)
-
-    def load(
-        self,
-        *,
-        mode_override: str | None = None,
-        runtime_mode_override: str | None = None,
-    ) -> Config:
-        """Reload configuration fields from project defaults and environment overrides.
-
-        Args:
-            mode_override: The mode override.
-            runtime_mode_override: The runtime mode override.
-
-        Returns:
-            Config: The load result."""
-        root_dir = project_root()
-        defaults, config_defaults = load_pyproject(root_dir)
-        from .helpers.docker import detect_runtime_mode
-
-        runtime_mode = detect_runtime_mode(runtime_mode_override)
-        mode = normalize_mode(mode_override or self.env("MODE"))
-
-        image_name_base = str(defaults["image_name_base"])
-        image_tag_base = str(defaults["image_tag_base"])
-        configs = {
-            mode_name: ModeConfig(
-                active=absolute_path(root_dir, str(config_defaults[mode_name])),
-                example=absolute_path(root_dir, str(config_defaults[f"{mode_name}_example"])),
-            )
-            for mode_name in mode_names()
+        """Load defaults, optional JSON, environment, then CLI overrides."""
+        root = project_root()
+        values: dict[str, Any] = {
+            "dirs": {"root": root},
+            "runtime": {},
+            "docker": {},
+            "resources": {
+                "host": {},
+                "profiles": {},
+                "roles": {
+                    "llamaswap": {"cpu": "low", "ram": "low", "swap": "low"},
+                    "llamacpp": {"cpu": "xhigh", "ram": "medium", "swap": "xhigh"},
+                    "vllm": {"cpu": "xhigh", "ram": "medium", "swap": "medium"},
+                    "lmcache": {"cpu": "medium", "ram": "medium", "swap": "medium"},
+                },
+            },
+            "locale": {
+                "timezone": detect_timezone(),
+                "lang": os.environ.get("LANG", "C.UTF-8"),
+                "lc_all": os.environ.get("LC_ALL", os.environ.get("LANG", "C.UTF-8")),
+            },
+            "lmcache": {},
+            "modes": {
+                "llamacpp": {
+                    "repo": {
+                        "url": "https://github.com/Luce-Org/llama.cpp.git",
+                        "ref": "luce-dflash",
+                    },
+                    "services": ["llamaswap", "llamacpp"],
+                },
+                "turboquant": {
+                    "repo": {
+                        "url": "https://github.com/TheTom/llama-cpp-turboquant.git",
+                        "ref": "feature/turboquant-kv-cache",
+                    },
+                    "services": ["llamaswap", "llamacpp"],
+                },
+                "qwen": {
+                    "repo": {"url": "https://github.com/ggml-org/llama.cpp.git", "ref": "master"},
+                    "services": ["llamaswap", "vllm", "lmcache", "llamacpp"],
+                },
+                "spiritbuun": {
+                    "repo": {
+                        "url": "https://github.com/spiritbuun/buun-llama-cpp.git",
+                        "ref": "master",
+                    },
+                    "services": ["llamaswap", "llamacpp"],
+                },
+                "lucebox": {
+                    "repo": {
+                        "url": "https://github.com/Luce-Org/llama.cpp.git",
+                        "ref": "luce-dflash",
+                    },
+                    "services": ["llamaswap", "llamacpp"],
+                    "hub": {"url": "https://github.com/Luce-Org/lucebox-hub.git", "ref": "main"},
+                },
+            },
+            "warmup": {},
+            "credentials": {},
         }
-        config_override = self.env("LS_CONFIG_FILE")
-        values = dict(
-            root_dir=root_dir,
-            runtime_mode=runtime_mode,
-            mode=mode,
-            image_name=image_name_for_mode(image_name_base, image_tag_base, mode),
-            container_name=self.env("CONTAINER_NAME", str(defaults["container_name"]))
-            or str(defaults["container_name"]),
-            host_port=int(
-                self.env("HOST_PORT", str(defaults["host_port"])) or str(defaults["host_port"])
-            ),
-            container_port=int(
-                self.env("CONTAINER_PORT", str(defaults["container_port"]))
-                or str(defaults["container_port"])
-            ),
-            pids_limit=int(str(defaults.get("pids_limit", 256))),
-            models_dir=absolute_path(
-                root_dir,
-                self.env("MODELS_DIR", str(defaults["models_dir"])) or str(defaults["models_dir"]),
-            ),
-            mmproj_dir=absolute_path(
-                root_dir,
-                self.env("MMPROJ_DIR", str(defaults["mmproj_dir"])) or str(defaults["mmproj_dir"]),
-            ),
-            chat_template_dir=absolute_path(
-                root_dir,
-                self.env("CHAT_TEMPLATE_DIR", str(defaults["chat_template_dir"]))
-                or str(defaults["chat_template_dir"]),
-            ),
-            auth_file=absolute_path(
-                root_dir,
-                self.env("AUTH_FILE", str(defaults["auth_file"])) or str(defaults["auth_file"]),
-            ),
-            auth_example_file=absolute_path(root_dir, str(defaults["auth_example_file"])),
-            runtime_dir=(root_dir / ".runtime").resolve(),
-            config_override=absolute_path(root_dir, config_override) if config_override else None,
-            configs=configs,
-            default_cuda_architectures=self.env(
-                "DEFAULT_CUDA_ARCHITECTURES", str(defaults["cuda_default_architectures"])
-            )
-            or str(defaults["cuda_default_architectures"]),
-            cmake_cuda_architectures=self.env("CMAKE_CUDA_ARCHITECTURES", "auto") or "auto",
-            llama_cpp_repo=self.env("LLAMA_CPP_REPO", str(defaults["llama_cpp_repo"]))
-            or str(defaults["llama_cpp_repo"]),
-            llama_cpp_ref=self.env("LLAMA_CPP_REF", str(defaults["llama_cpp_ref"]))
-            or str(defaults["llama_cpp_ref"]),
-            lucebox_hub_repo=self.env("LUCEBOX_HUB_REPO", str(defaults["lucebox_hub_repo"]))
-            or str(defaults["lucebox_hub_repo"]),
-            lucebox_hub_ref=self.env("LUCEBOX_HUB_REF", str(defaults["lucebox_hub_ref"]))
-            or str(defaults["lucebox_hub_ref"]),
-            host_tz=self.env("HOST_TZ", detect_timezone()) or detect_timezone(),
-            host_lang=self.env("HOST_LANG", os.environ.get("LANG", "C.UTF-8")) or "C.UTF-8",
-            host_lc_all=self.env(
-                "HOST_LC_ALL", os.environ.get("LC_ALL", os.environ.get("LANG", "C.UTF-8"))
-            )
-            or "C.UTF-8",
-        )
-
-        for name, value in values.items():
-            setattr(self, name, value)
-        return self
-
-    def image_for_mode(self, mode: str) -> str:
-        """Return the image name for a server mode.
-
-        Args:
-            mode: The mode.
-
-        Returns:
-            str: The image for mode result."""
-        defaults, _ = load_pyproject(self.root_dir)
-        return image_name_for_mode(
-            str(defaults["image_name_base"]), str(defaults["image_tag_base"]), mode
-        )
-
-    def load_auth(self) -> ResolvedAuth:
-        """Load Hugging Face and API credentials.
-
-        Returns:
-            ResolvedAuth: The load auth result.
-
-        Raises:
-            SystemExit: If the load auth operation cannot be completed."""
-        hf_token = os.environ.get("HF_TOKEN") or self.env("HF_TOKEN")
-        api_key = self.env("API_KEY") or os.environ.get("API_KEY")
-        if hf_token and api_key:
-            return ResolvedAuth(hf_token=hf_token, api_key=api_key)
-
-        source_path: Path | None = None
-        if self.auth_file.is_file():
-            source_path = self.auth_file
-        elif self.auth_example_file.is_file():
-            source_path = self.auth_example_file
-            LOGGER.info(
-                "Using %s; create %s for local credentials",
-                self.auth_example_file.name,
-                self.auth_file.name,
-            )
-        else:
-            LOGGER.warning(
-                "No auth file found at %s; private Hugging Face downloads may fail", self.auth_file
-            )
-            return ResolvedAuth(hf_token=hf_token, api_key=api_key)
-
+        path = Path(config_file) if config_file else root / "config.json"
+        if path.is_file():
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as error:
+                raise SystemExit(f"invalid configuration file {path}: {error}") from error
+            if not isinstance(payload, dict):
+                raise SystemExit(f"invalid configuration file {path}: expected a JSON object")
+            _merge(values, payload)
+        elif config_file:
+            raise SystemExit(f"configuration file not found: {path}")
+        _apply_env(cls, values)
+        credentials = values.setdefault("credentials", {})
+        if value := os.environ.get("HF_TOKEN"):
+            credentials["hf_token"] = value
+        if value := os.environ.get("API_KEY"):
+            credentials["api_key"] = value
+        for mode in values.get("modes", {}).values():
+            repo = mode.get("repo", {})
+            repo["url"] = os.environ.get("EASYLLAMA_LLAMA_CPP_REPO", repo.get("url", ""))
+            repo["ref"] = os.environ.get("EASYLLAMA_LLAMA_CPP_REF", repo.get("ref", ""))
+        lucebox = values.get("modes", {}).get("lucebox", {})
+        hub = lucebox.get("hub", {})
+        hub["url"] = os.environ.get("EASYLLAMA_LUCEBOX_HUB_REPO", hub.get("url", ""))
+        hub["ref"] = os.environ.get("EASYLLAMA_LUCEBOX_HUB_REF", hub.get("ref", ""))
+        runtime = values.setdefault("runtime", {})
+        if mode_override is not None:
+            runtime["mode"] = mode_override
+        if runtime_mode_override is not None:
+            runtime["environment"] = runtime_mode_override
+        if host_override is not None:
+            runtime["host"] = host_override
         try:
-            payload = json.loads(source_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            raise SystemExit(f"invalid JSON auth file: {source_path}: {exc}") from exc
+            return cls.model_validate(values, context={"root": root})
+        except ValueError as error:
+            raise SystemExit(f"invalid configuration: {error}") from error
 
-        return ResolvedAuth(
-            hf_token=hf_token or payload.get("hf_token") or None,
-            api_key=api_key or payload.get("api_key") or None,
-        )
+    def image_for_mode(self, mode: MODE | str) -> str:
+        """Return the image name for a server mode."""
+        return image_name_for_mode(self.docker.image_name, self.docker.image_tag, str(mode))
+
+    def load_auth(self) -> CredentialsConfig:
+        """Return credentials centralized in the configuration model."""
+        return self.credentials
 
     def resolve_ls_config(self) -> Path:
         """Resolve the active llama-swap configuration file.
@@ -317,32 +648,28 @@ class Config:
 
         Raises:
             SystemExit: If the resolve ls config operation cannot be completed."""
-        if self.config_override is not None:
-            if not self.config_override.is_file():
+        if self.llama_swap_override is not None:
+            if not self.llama_swap_override.is_file():
                 raise SystemExit(
                     "no llama-swap config found at "
-                    f"{self.config_override}; set EASYLLAMA_LS_CONFIG_FILE "
+                    f"{self.llama_swap_override}; set EASYLLAMA_LS_CONFIG_FILE "
                     "to a readable file"
                 )
-            return self.config_override
+            return self.llama_swap_override
 
-        config_pair = self.configs[self.mode]
-        if config_pair.active.is_file():
-            return config_pair.active
-        if config_pair.example.is_file():
-            LOGGER.info(
-                "Using %s; create %s for local overrides",
-                config_pair.example.name,
-                config_pair.active.name,
-            )
-            return config_pair.example
+        active = self.dirs.root / f"config/config.{self.runtime.mode}.yml"
+        example = active.with_suffix(".yml.example")
+        if active.is_file():
+            return active
+        if example.is_file():
+            LOGGER.info("Using %s; create %s for local overrides", example.name, active.name)
+            return example
         raise SystemExit(
-            f"no llama-swap config found for {self.mode} mode; "
-            "set EASYLLAMA_LS_CONFIG_FILE or create "
-            f"{config_pair.active} from {config_pair.example}"
+            f"no llama-swap config found for {self.runtime.mode} mode; "
+            f"set EASYLLAMA_LS_CONFIG_FILE or create {active} from {example}"
         )
 
-    def effective_config_path(self, auth: ResolvedAuth) -> tuple[Path, str]:
+    def effective_config_path(self, auth: CredentialsConfig) -> tuple[Path, str]:
         """Create an authenticated runtime configuration when needed.
 
         Args:
@@ -354,12 +681,12 @@ class Config:
         if not auth.api_key:
             return config_path, f"/app/config.d/{config_path.name}"
 
-        self.runtime_dir.mkdir(parents=True, exist_ok=True)
-        effective_path = self.runtime_dir / f"{config_path.name}.effective.yaml"
+        self.dirs.runtime.mkdir(parents=True, exist_ok=True)
+        effective_path = self.dirs.runtime / f"{config_path.name}.effective.yaml"
         payload = f"apiKeys:\n  - {json.dumps(auth.api_key)}\n" + config_path.read_text(
             encoding="utf-8"
         )
-        fd, temporary_name = tempfile.mkstemp(dir=self.runtime_dir, prefix=".effective-")
+        fd, temporary_name = tempfile.mkstemp(dir=self.dirs.runtime, prefix=".effective-")
         temporary_path = Path(temporary_name)
         try:
             os.fchmod(fd, 0o600)
@@ -381,10 +708,10 @@ class Config:
 
         Raises:
             SystemExit: If the container config path operation cannot be completed."""
-        if self.config_override is not None:
-            if not self.config_override.is_file():
-                raise SystemExit(f"container config not found at {self.config_override}")
-            return self.config_override
+        if self.llama_swap_override is not None:
+            if not self.llama_swap_override.is_file():
+                raise SystemExit(f"container config not found at {self.llama_swap_override}")
+            return self.llama_swap_override
 
         config_dir = Path("/app/config.d")
         if config_dir.is_dir():
@@ -402,10 +729,16 @@ class Config:
 
         Returns:
             str: The listen url result."""
-        port = self.host_port if self.runtime_mode == RUNTIME_HOST else self.container_port
-        return f"http://127.0.0.1:{port}"
+        port = (
+            self.runtime.host_port
+            if self.runtime.environment == RUNTIME.HOST
+            else self.runtime.container_port
+        )
+        host = self.runtime.host
+        url_host = f"[{host}]" if ":" in host else host
+        return f"http://{url_host}:{port}"
 
-    def resolved_api_key(self, auth: ResolvedAuth) -> str | None:
+    def resolved_api_key(self, auth: CredentialsConfig) -> str | None:
         """Resolve the API key from credentials or llama-swap configuration.
 
         Args:
@@ -417,7 +750,7 @@ class Config:
             return auth.api_key
         config_path = (
             self.container_config_path()
-            if self.runtime_mode == RUNTIME_CONTAINER
+            if self.runtime.environment == RUNTIME.CONTAINER
             else self.resolve_ls_config()
         )
         if not config_path.is_file():
@@ -439,7 +772,7 @@ class Config:
                 return value or None
         return None
 
-    def map_mmproj(self, auth: ResolvedAuth, source: str) -> str:
+    def map_mmproj(self, auth: CredentialsConfig, source: str) -> str:
         """Resolve or download a multimodal projector into its container path.
 
         Args:
@@ -462,8 +795,8 @@ class Config:
             filename = http.filename
             if not filename:
                 raise SystemExit(f"could not infer mmproj filename from URL: {source}")
-            self.mmproj_dir.mkdir(parents=True, exist_ok=True)
-            output_path = self.mmproj_dir / filename
+            self.dirs.mmproj.mkdir(parents=True, exist_ok=True)
+            output_path = self.dirs.mmproj / filename
             expected_size = http.content_length()
             if not output_path.is_file() or (
                 expected_size is not None and output_path.stat().st_size != expected_size
@@ -479,23 +812,23 @@ class Config:
                     )
                 temp_path.replace(output_path)
                 LOGGER.info("Downloaded mmproj to %s", output_path)
-            return f"{MMPROJ_DIR_CONTAINER}/{filename}"
-        if source.startswith(f"{MMPROJ_DIR_CONTAINER}/"):
+            return f"{CONTAINERPATH.MMPROJ}/{filename}"
+        if source.startswith(f"{CONTAINERPATH.MMPROJ}/"):
             return source
-        if source.startswith(str(self.mmproj_dir) + "/"):
-            return f"{MMPROJ_DIR_CONTAINER}/{Path(source).relative_to(self.mmproj_dir).as_posix()}"
+        if source.startswith(str(self.dirs.mmproj) + "/"):
+            return f"{CONTAINERPATH.MMPROJ}/{Path(source).relative_to(self.dirs.mmproj).as_posix()}"
         if source.startswith("mmproj/"):
-            return f"{MMPROJ_DIR_CONTAINER}/{source.removeprefix('mmproj/')}"
-        if "/" not in source:
-            return f"{MMPROJ_DIR_CONTAINER}/{source}"
+            return f"{CONTAINERPATH.MMPROJ}/{source.removeprefix('mmproj/')}"
+        if "/" not in source and "\\" not in source:
+            return f"{CONTAINERPATH.MMPROJ}/{source}"
         if Path(source).is_absolute():
             raise SystemExit(
                 "EASYLLAMA_MMPROJ_FILE must be in "
-                f"{self.mmproj_dir}, use mmproj/<file>, or provide a URL"
+                f"{self.dirs.mmproj}, use mmproj/<file>, or provide a URL"
             )
-        return f"{MMPROJ_DIR_CONTAINER}/{source.removeprefix('./')}"
+        return f"{CONTAINERPATH.MMPROJ}/{source.removeprefix('./')}"
 
-    def mmproj_arg(self, auth: ResolvedAuth) -> str:
+    def mmproj_arg(self, auth: CredentialsConfig) -> str:
         """Build the optional llama.cpp multimodal projector argument.
 
         Args:
@@ -503,8 +836,8 @@ class Config:
 
         Returns:
             str: The mmproj arg result."""
-        source = self.env("MMPROJ_FILE")
-        hf_mmproj = self.env("HF_MMPROJ")
+        source = os.environ.get("EASYLLAMA_MMPROJ_FILE")
+        hf_mmproj = os.environ.get("EASYLLAMA_HF_MMPROJ")
         if not source and hf_mmproj:
             source = HuggingFace.mmproj_url(hf_mmproj)
         if not source:

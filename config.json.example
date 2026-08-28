@@ -1,0 +1,154 @@
+{
+  "dirs": {
+    "root": ".",
+    "models": "cache/models",
+    "root_cache": "cache/root",
+    "pkg_cache": "cache/pkg",
+    "python_cache": "cache/python",
+    "mmproj": "mmproj",
+    "chat_template": "chat_template",
+    "runtime": ".runtime"
+  },
+  "runtime": {
+    "environment": "host",
+    "mode": "llamacpp",
+    "host": "127.0.0.1",
+    "host_port": 8080,
+    "container_port": 8080,
+    "pids_limit": 256
+  },
+  "docker": {
+    "image_name": "easyllama",
+    "image_tag": "cuda13",
+    "container_name": "easyllama-server-swap",
+    "cuda": {
+      "default": "120",
+      "cmake": "auto"
+    }
+  },
+  "resources": {
+    "host": {
+      "cpus": 32,
+      "ram_gib": null,
+      "swap_gib": null
+    },
+    "profiles": {
+      "cpu": {
+        "low": 2,
+        "medium": 4,
+        "high": 8,
+        "xhigh": 16
+      },
+      "ram": {
+        "low": 8,
+        "medium": 16,
+        "high": 32,
+        "xhigh": 64
+      },
+      "swap": {
+        "low": 4,
+        "medium": 8,
+        "high": 16,
+        "xhigh": 32
+      }
+    },
+    "roles": {
+      "llamaswap": {
+        "cpu": "low",
+        "ram": "low",
+        "swap": "low"
+      },
+      "llamacpp": {
+        "cpu": "xhigh",
+        "ram": "medium",
+        "swap": "xhigh"
+      },
+      "vllm": {
+        "cpu": "xhigh",
+        "ram": "medium",
+        "swap": "medium"
+      },
+      "lmcache": {
+        "cpu": "medium",
+        "ram": "medium",
+        "swap": "medium"
+      }
+    }
+  },
+  "modes": {
+    "llamacpp": {
+      "repo": {
+        "url": "https://github.com/Luce-Org/llama.cpp.git",
+        "ref": "luce-dflash"
+      },
+      "services": [
+        "llamaswap",
+        "llamacpp"
+      ]
+    },
+    "turboquant": {
+      "repo": {
+        "url": "https://github.com/TheTom/llama-cpp-turboquant.git",
+        "ref": "feature/turboquant-kv-cache"
+      },
+      "services": [
+        "llamaswap",
+        "llamacpp"
+      ]
+    },
+    "qwen": {
+      "repo": {
+        "url": "https://github.com/ggml-org/llama.cpp.git",
+        "ref": "master"
+      },
+      "services": [
+        "llamaswap",
+        "vllm",
+        "lmcache",
+        "llamacpp"
+      ]
+    },
+    "spiritbuun": {
+      "repo": {
+        "url": "https://github.com/spiritbuun/buun-llama-cpp.git",
+        "ref": "master"
+      },
+      "services": [
+        "llamaswap",
+        "llamacpp"
+      ]
+    },
+    "lucebox": {
+      "repo": {
+        "url": "https://github.com/Luce-Org/llama.cpp.git",
+        "ref": "luce-dflash"
+      },
+      "services": [
+        "llamaswap",
+        "llamacpp"
+      ],
+      "hub": {
+        "url": "https://github.com/Luce-Org/lucebox-hub.git",
+        "ref": "main"
+      }
+    }
+  },
+  "locale": {
+    "timezone": "UTC",
+    "lang": "C.UTF-8",
+    "lc_all": "C.UTF-8"
+  },
+  "lmcache": {
+    "chunk_size": 1600,
+    "l1_size_gb": 16
+  },
+  "credentials": {
+    "hf_token": "",
+    "api_key": ""
+  },
+  "warmup": {
+    "timeout": 1800,
+    "poll_interval": 2.0
+  },
+  "llama_swap_override": null
+}

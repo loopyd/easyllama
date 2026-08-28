@@ -1,35 +1,21 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/mostlygeek/llama-swap/refs/heads/main/config-schema.json
-#
-# Copy this file to config/config.spiritbuun.yml for local edits and overrides.
-# Use this mode with ./run.sh --mode spiritbuun start when you want the
-# spiritbuun/buun-llama-cpp qwen3-chat path with a published DFlash GGUF draft.
-
-healthCheckTimeout: 1800
-logLevel: info
-sendLoadingState: false
-globalTTL: 0
-
-# Shared llama-server argument macros
 macros:
-  server_bin: "/opt/venv/bin/easyllama"
-  emb_hf_model: "Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M"
-  draft_context: "256"
-
+  emb_hf_model: Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M
+  draft_context: '256'
 models:
-  "qwen3-chat":
+  qwen3-chat:
     concurrencyLimit: 4
-    name: "Pi Qwen3 Chat 27B Spiritbuun"
-    description: "Primary chat/completions model using spiritbuun dflash with a published GGUF draft"
+    name: Pi Qwen3 Chat 27B Spiritbuun
+    description: Primary chat/completions model using spiritbuun dflash with a published
+      GGUF draft
     filters:
       setParams:
-        reasoning: "off"
+        reasoning: 'off'
         chat_template_kwargs:
           tokenize: false
           add_generation_prompt: true
           enable_thinking: false
           preserve_thinking: false
-    cmd: |
-      ${server_bin}
+    cmd: '${server_bin}
       server
       spiritbuun
       --bin /app/bin/llama-server-spiritbuun
@@ -60,18 +46,14 @@ models:
       --draft-max 8
       --draft-min 1
       --draft-p-min 0.75
-
-    env:
-      - "HF_TOKEN=${env.HF_TOKEN}"
-
-  "qwen3-embeddings":
+      '
+  qwen3-embeddings:
     concurrencyLimit: 4
-    name: "Pi Qwen3 Embeddings 8B"
-    description: "Dense embedding model for vector search, RAG, similarity"
-    cmd: |
-      ${server_bin}
+    name: Pi Qwen3 Embeddings 8B
+    description: Dense embedding model for vector search, RAG, similarity
+    cmd: '${server_bin}
       server
-      basic
+      llamacpp
       --bin /app/bin/llama-server-spiritbuun
       --port ${PORT}
       -hf ${emb_hf_model}
@@ -86,6 +68,4 @@ models:
       --no-mmap
       --embedding
       --no-warmup
-
-    env:
-      - "HF_TOKEN=${env.HF_TOKEN}"
+      '

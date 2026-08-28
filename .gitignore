@@ -1,16 +1,21 @@
 # Local runtime configuration and secrets
+config.json
+!config.json.example
 auth.json
+!auth.json.example
 config/*.yml
 !config/*.yml.example
 
-# Environment files
 .env
 .env.*
 !.env.example
 
-# Model cache / artifacts
-models/*
-!models/.gitkeep
+# Host caches / artifacts
+cache/*/*
+!cache/root/.gitkeep
+!cache/pkg/.gitkeep
+!cache/python/.gitkeep
+!cache/models/.gitkeep
 mmproj/*
 !mmproj/.gitkeep
 chat_template/*
@@ -38,6 +43,7 @@ __pycache__/
 *.pyo
 *.pyd
 .ruff_cache/
+.pytest_cache/
 *.egg-info/
 dist/
 build/

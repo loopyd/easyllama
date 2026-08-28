@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from pydantic.dataclasses import dataclass
 
 from .base import BuildSource, RuntimeModeMetadata, ServerBase, Spec, server_metadata
-from .basic import BasicServer
+from .llamacpp import LlamaCppServer
 from .lucebox import LuceboxServer
+from .qwen import QwenServer
 from .spiritbuun import SpiritbuunServer
+from .turboquant import TurboquantServer
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,7 +25,9 @@ class ServerDef:
 
 
 _SERVERS: dict[str, type[ServerBase]] = {
-    BasicServer.name: BasicServer,
+    LlamaCppServer.name: LlamaCppServer,
+    TurboquantServer.name: TurboquantServer,
+    QwenServer.name: QwenServer,
     LuceboxServer.name: LuceboxServer,
     SpiritbuunServer.name: SpiritbuunServer,
 }
