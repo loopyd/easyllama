@@ -102,11 +102,16 @@ def test_proxy_config_has_explicit_container_contracts() -> None:
     assert "/app/bin/llama-server-qwen" in chat_command
     assert "RVN-Q4_K_M-multilingual-mtp.gguf" in chat_command
     assert "--ctx-size 262144" in chat_command
+    assert "--parallel 4" in chat_command
+    assert "--batch-size 4096 --ubatch-size 1024" in chat_command
     assert "--cache-type-k q8_0 --cache-type-v q8_0" in chat_command
     assert "--spec-type draft-mtp --spec-draft-n-max 2" in chat_command
     assert embeddings.health_path == "/v1/models"
     assert embeddings.lifecycle_port == 9003
-    assert "--host 0.0.0.0" in " ".join(embeddings.command)
+    embeddings_command = " ".join(embeddings.command)
+    assert "--host 0.0.0.0" in embeddings_command
+    assert "--ctx-size 163840" in embeddings_command
+    assert "--batch-size 1024 --ubatch-size 1024 --parallel 4" in embeddings_command
     assert chat.environment == ("HF_TOKEN=${HF_TOKEN}",)
     assert embeddings.environment == ("HF_TOKEN=${HF_TOKEN}",)
 

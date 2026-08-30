@@ -15,7 +15,7 @@ macros:
   pi_emb_hf_model: Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M
 models:
   qwen3-chat:
-    concurrencyLimit: 1
+    concurrencyLimit: 4
     name: Qwen3.8 Chat 27B RVN Heretic Q4_K_M MTP
     description: Primary thinking/tool-use model; multilingual RVN Heretic Q4_K_M with embedded MTP served by llama.cpp
     cmd: '${server_bin}
@@ -30,7 +30,7 @@ models:
       --n-predict 32768
       --n-gpu-layers all
       --fit off
-      --parallel 1
+      --parallel 4
       --kv-unified
       --spec-type draft-mtp
       --spec-draft-n-max 2
@@ -40,8 +40,8 @@ models:
       --flash-attn on
       --cache-type-k q8_0
       --cache-type-v q8_0
-      --batch-size 2048
-      --ubatch-size 512
+      --batch-size 4096
+      --ubatch-size 1024
       --cache-prompt
       --cache-ram 16384
       --ctx-checkpoints 32
@@ -70,10 +70,10 @@ models:
       --host 0.0.0.0
       --port ${PORT}
       -hf ${pi_emb_hf_model}
-      --ctx-size 40960
+      --ctx-size 163840
       --batch-size 1024
       --ubatch-size 1024
-      --parallel 1
+      --parallel 4
       --flash-attn on
       --cache-type-k f16
       --cache-type-v f16
