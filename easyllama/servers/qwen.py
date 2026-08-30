@@ -10,15 +10,15 @@ from .llamacpp import LlamaCppServer
 
 @server_metadata(
     name="qwen",
-    help="Run the Qwen auxiliary llama.cpp server launcher",
+    help="Run the Qwen llama.cpp server launcher",
     runtime_modes=(
         RuntimeModeMetadata(
             mode="qwen",
             docker_target="runtime-qwen",
-            backend="vllm",
+            backend="llamacpp",
             build_sources=(
                 BuildSource(
-                    label="llamacpp-auxiliary",
+                    label="llamacpp",
                     repo_attr="qwen",
                     repo_build_arg="LLAMA_CPP_REPO",
                     ref_build_arg="LLAMA_CPP_REF",

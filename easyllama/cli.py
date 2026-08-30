@@ -11,6 +11,7 @@ from pydantic.dataclasses import dataclass
 from .config import IMAGE, RUNTIME, Config
 from .helpers.docker import DockerRuntime
 from .helpers.logger import LOG as APP_LOG
+from .lifecycle import lifecycle_main
 from .runtime import serve, warmup_models
 from .servers import defs as server_defs, mode_names, run as run_server
 
@@ -241,6 +242,16 @@ def _clean_handler(args: argparse.Namespace, extra_args: list[str]) -> int:
     return DockerRuntime(settings).clean(all_images=args.all_images)
 
 
+def _lifecycle_handler(args: argparse.Namespace, extra_args: list[str]) -> int:
+    """Run the private model lifecycle controller."""
+    return lifecycle_main(extra_args + list(args.lifecycle_args))
+
+
+def _lifecycle_config(parser: argparse.ArgumentParser) -> None:
+    """Pass controller and backend arguments through unchanged."""
+    parser.add_argument("lifecycle_args", nargs=argparse.REMAINDER)
+
+
 def _serve_handler(args: argparse.Namespace, extra_args: list[str]) -> int:
     """Handle the serve command.
 
@@ -349,6 +360,13 @@ def command_tree() -> tuple[CommandNode, ...]:
             name="serve",
             help="Run llama-swap directly inside the container",
             handler=_serve_handler,
+        ),
+        CommandNode(
+            name="lifecycle",
+            help="Run a sleeping model backend lifecycle controller",
+            handler=_lifecycle_handler,
+            configure_parser=_lifecycle_config,
+            add_help=False,
         ),
         CommandNode(
             name="server",

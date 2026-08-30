@@ -31,6 +31,7 @@ class ContainerContract:
     stop_signal: str = "SIGTERM"
     gpu: bool = False
     environment: tuple[str, ...] = ()
+    lifecycle_port: int | None = None
 
     @property
     def endpoint(self) -> str | None:
@@ -63,6 +64,20 @@ class ProxyConfigCompiler:
         "logLevel": "info",
         "sendLoadingState": False,
         "globalTTL": 0,
+        "routing": {
+            "router": {
+                "use": "group",
+                "settings": {
+                    "groups": {
+                        "gpu": {
+                            "swap": True,
+                            "exclusive": True,
+                            "members": ["qwen3-chat", "qwen3-embeddings"],
+                        }
+                    }
+                },
+            }
+        },
     }
     MACRO_DEFAULTS: ClassVar[dict[str, Any]] = {"server_bin": "/opt/venv/bin/easyllama"}
     ENV_DEFAULTS: ClassVar[tuple[str, ...]] = ("HF_TOKEN=${HF_TOKEN}",)
@@ -76,7 +91,7 @@ class ProxyConfigCompiler:
 
     def image_for_model(self, model: str, command: str) -> IMAGE:
         """Select the required backend image for a configured model."""
-        if self.mode is MODE.QWEN and ("vllm" in command or model == "qwen3-chat"):
+        if self.mode is MODE.QWEN and "vllm" in command:
             return IMAGE.VLLM
         return IMAGE.LLAMACPP
 
@@ -112,6 +127,7 @@ class ProxyConfigCompiler:
             )
             image = self.image_for_model(model_id, command)
             port = self.start_port + index
+            lifecycle_port = self.start_port + len(models) + index
             model_name = _NAME.sub("-", model_id.lower()).strip("-")
             name = f"easyllama-{self.mode}-{image}-{model_name}"
             command = _PORT.sub(str(port), command)
@@ -133,21 +149,27 @@ class ProxyConfigCompiler:
                     health_path="/health" if image is IMAGE.VLLM else "/v1/models",
                     gpu=True,
                     environment=environment,
+                    lifecycle_port=lifecycle_port,
                 )
             )
             model.update(
                 {
-                    # llama-swap requires cmd even when proxying an external process.
-                    "cmd": "/bin/sleep infinity",
-                    "type": "proxy",
+                    "cmd": (
+                        f"curl --fail --silent --show-error --request POST "
+                        f"http://{name}:{lifecycle_port}/run"
+                    ),
+                    "cmdStop": (
+                        f"curl --fail --silent --show-error --request POST "
+                        f"http://{name}:{lifecycle_port}/sleep"
+                    ),
                     "proxy": f"http://{name}:{port}",
                     "checkEndpoint": contracts[-1].health_path,
-                    "ttl": 0,
-                    "swap": False,
                     "useModelName": model_id,
                 }
             )
-        if self.images.requires(IMAGE.LMCACHE):
+        if self.images.requires(IMAGE.LMCACHE) and any(
+            contract.image is IMAGE.VLLM for contract in contracts
+        ):
             dependency = self.images.dependency(IMAGE.LMCACHE)
             command = tuple(item.replace("{mode}", str(self.mode)) for item in dependency.command)
             if self.settings is not None:
@@ -165,6 +187,11 @@ class ProxyConfigCompiler:
                 ),
             )
         payload.pop("macros", None)
+        configured = set(models)
+        members = payload["routing"]["router"]["settings"]["groups"]["gpu"]["members"]
+        payload["routing"]["router"]["settings"]["groups"]["gpu"]["members"] = [
+            model for model in members if model in configured
+        ]
         if api_key:
             payload["apiKeys"] = [api_key]
         # Ensure generated values remain ordinary YAML scalars, not enum objects.

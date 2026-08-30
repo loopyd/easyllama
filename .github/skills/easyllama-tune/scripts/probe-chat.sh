@@ -46,7 +46,7 @@ if ./run.sh --mode "${MODE}" warmup "${selected_model_id}"; then
   show_live_server_processes "${ACTIVE_CONFIG}"
 else
   status=$?
-  echo "+ docker logs --tail 120 ${CONTAINER_NAME} 2>&1" >&2
+  echo "+ ./run.sh --mode ${MODE} logs --tail 120" >&2
   logs="$(recent_container_logs 120)"
   printf '%s\n' "${logs}" >&2
   if logs_indicate_fit_boundary "${logs}"; then

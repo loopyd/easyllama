@@ -393,8 +393,18 @@ class DockerRuntime:
         )
         if not builder.exists():
             self.build_image(contract.image)
+        command = list(contract.command)
+        if contract.lifecycle_port is not None:
+            command = [
+                "/opt/venv/bin/easyllama",
+                "lifecycle",
+                "--port",
+                str(contract.lifecycle_port),
+                "--",
+                *command,
+            ]
         kwargs: dict[str, Any] = {
-            "command": list(contract.command),
+            "command": command,
             "entrypoint": [],
             "detach": True,
             "init": True,
@@ -418,8 +428,14 @@ class DockerRuntime:
             },
         }
         if contract.health_path:
-            health_port = 18080 if contract.image is IMAGE.LMCACHE else contract.port
-            health_path = "/" if contract.image is IMAGE.LMCACHE else contract.health_path
+            health_port = contract.lifecycle_port or (
+                18080 if contract.image is IMAGE.LMCACHE else contract.port
+            )
+            health_path = (
+                "/health"
+                if contract.lifecycle_port
+                else ("/" if contract.image is IMAGE.LMCACHE else contract.health_path)
+            )
             kwargs["healthcheck"] = {
                 "test": [
                     "CMD",

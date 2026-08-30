@@ -79,29 +79,36 @@ def test_runtime_base_has_no_backend() -> None:
 def test_proxy_config_has_explicit_container_contracts() -> None:
     plan = ProxyConfigCompiler(MODE.QWEN).compile(Path("config/config.qwen.yml.example"), "secret")
     chat = plan.config["models"]["qwen3-chat"]
-    assert chat["cmd"] == "/bin/sleep infinity"
-    assert chat["type"] == "proxy"
-    assert chat["swap"] is False
-    assert chat["proxy"] == "http://easyllama-qwen-vllm-qwen3-chat:9000"
-    assert "env" not in chat and "cmdStop" not in chat
+    assert chat["cmd"].endswith("http://easyllama-qwen-llamacpp-qwen3-chat:9002/run")
+    assert chat["cmdStop"].endswith("http://easyllama-qwen-llamacpp-qwen3-chat:9002/sleep")
+    assert chat["proxy"] == "http://easyllama-qwen-llamacpp-qwen3-chat:9000"
+    assert "env" not in chat and "type" not in chat
+    assert plan.config["routing"]["router"]["settings"]["groups"]["gpu"] == {
+        "swap": True,
+        "exclusive": True,
+        "members": ["qwen3-chat", "qwen3-embeddings"],
+    }
     assert plan.config["apiKeys"] == ["secret"]
     assert plan.config["healthCheckTimeout"] == 1800
     assert plan.config["logLevel"] == "info"
     assert plan.config["sendLoadingState"] is False
-    assert plan.config["globalTTL"] == 0
+    assert plan.config["globalTTL"] == 1800
+    assert "ttl" not in chat
     assert "macros" not in plan.config
-    lmcache, vllm, llamacpp = plan.containers
-    assert lmcache.command[:2] == ("/opt/venv/bin/lmcache", "server")
-    assert lmcache.command[lmcache.command.index("--instance-id") + 1] == "easyllama-qwen"
-    assert lmcache.command[lmcache.command.index("--host") + 1] == "0.0.0.0"
-    assert vllm.health_path == "/health" and vllm.stop_signal == "SIGTERM"
-    vllm_command = " ".join(vllm.command)
-    assert "/app/bin/qwen-lmcache-vllm" not in vllm_command
-    assert "${vllm_bin}" not in vllm_command
-    assert "/opt/venv/bin/vllm" in vllm_command
-    assert llamacpp.health_path == "/v1/models"
-    assert vllm.environment.count("HF_TOKEN=${HF_TOKEN}") == 1
-    assert llamacpp.environment == ("HF_TOKEN=${HF_TOKEN}",)
+    chat, embeddings = plan.containers
+    assert chat.health_path == "/v1/models" and chat.stop_signal == "SIGTERM"
+    assert chat.lifecycle_port == 9002
+    chat_command = " ".join(chat.command)
+    assert "/app/bin/llama-server-qwen" in chat_command
+    assert "RVN-Q4_K_M-multilingual-mtp.gguf" in chat_command
+    assert "--ctx-size 262144" in chat_command
+    assert "--cache-type-k q8_0 --cache-type-v q8_0" in chat_command
+    assert "--spec-type draft-mtp --spec-draft-n-max 2" in chat_command
+    assert embeddings.health_path == "/v1/models"
+    assert embeddings.lifecycle_port == 9003
+    assert "--host 0.0.0.0" in " ".join(embeddings.command)
+    assert chat.environment == ("HF_TOKEN=${HF_TOKEN}",)
+    assert embeddings.environment == ("HF_TOKEN=${HF_TOKEN}",)
 
 
 def test_proxy_compiler_expands_command_macros() -> None:
@@ -113,6 +120,7 @@ def test_proxy_compiler_expands_command_macros() -> None:
     assert "${env." not in command
     assert "${EASYLLAMA_MMPROJ_ARG}" in command
     assert "${PORT}" not in command
+    assert plan.config["globalTTL"] == 0
 
 
 def test_hf_progress_supports_xet_postfix() -> None:
@@ -160,8 +168,15 @@ def test_dependency_containers_override_runtime_entrypoint(monkeypatch: Any) -> 
         {},
     )
     assert calls[0][1]["entrypoint"] == []
+    assert calls[0][1]["command"][:5] == [
+        "/opt/venv/bin/easyllama",
+        "lifecycle",
+        "--port",
+        "9002",
+        "--",
+    ]
     assert "ipc_mode" not in calls[0][1]
-    assert calls[0][1]["healthcheck"]["test"][-1].endswith("/v1/models")
+    assert calls[0][1]["healthcheck"]["test"][-1].endswith(":9002/health")
 
 
 def test_wait_for_dependency_requires_healthy(monkeypatch: Any) -> None:
@@ -385,9 +400,7 @@ def test_lmcache_contract_uses_nested_config(monkeypatch: Any) -> None:
     plan = ProxyConfigCompiler(MODE.QWEN, settings=settings).compile(
         Path("config/config.qwen.yml.example")
     )
-    lmcache = plan.containers[0]
-    assert lmcache.command[lmcache.command.index("--chunk-size") + 1] == "2048"
-    assert lmcache.command[lmcache.command.index("--l1-size-gb") + 1] == "48"
+    assert all(contract.image is not IMAGE.LMCACHE for contract in plan.containers)
 
 
 def test_network_name_uses_mode() -> None:

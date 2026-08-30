@@ -1,62 +1,64 @@
-hooks:
-  on_startup:
-    preload:
-    - qwen3-chat
+globalTTL: 1800
+routing:
+  router:
+    use: group
+    settings:
+      groups:
+        gpu:
+          swap: true
+          exclusive: true
+          members:
+          - qwen3-chat
+          - qwen3-embeddings
 macros:
-  vllm_wrapper_bin: /app/bin/vllm-wrapper
-  vllm_bin: /opt/venv/bin/vllm
-  qwen3_chat_target_hf: gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090
+  qwen3_chat_target_hf: 0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF:RVN-Q4_K_M-multilingual-mtp.gguf
   pi_emb_hf_model: Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M
 models:
   qwen3-chat:
-    concurrencyLimit: 4
-    name: Qwen3.8 Chat 27B NVFP4 RTX 5090
-    description: Primary thinking/tool-use model; RTX 5090 ModelOpt NVFP4 weights
-      served by vLLM
-    cmd: '${vllm_wrapper_bin}
-      serve
-      --vllm-url http://127.0.0.1:18000
-      --listen :${PORT}
-      --sleep-level 2
-      --wait-timeout 1800s
-      --
-      /app/bin/log-exec
-      ${vllm_bin}
-      serve
-      ${qwen3_chat_target_hf}
-      --host 127.0.0.1
-      --port 18000
-      --served-model-name qwen3-chat
-      --max-model-len 262144
-      --quantization modelopt
-      --trust-remote-code
-      --max-num-seqs 16
-      --kv-cache-dtype fp8
-      --gpu-memory-utilization 0.96
-      --compilation-config.max_cudagraph_capture_size=4
-      --uvicorn-log-level info
-      --enable-log-requests
-      --log-error-stack
-      --chat-template /chat_template/qwen3.8.jinja
-      --default-chat-template-kwargs ''{"enable_thinking":true,"preserve_thinking":false}''
-      --reasoning-parser qwen3
-      --enable-auto-tool-choice
-      --tool-call-parser qwen3_xml
-      --enable-sleep-mode
-      --enable-chunked-prefill
+    concurrencyLimit: 1
+    name: Qwen3.8 Chat 27B RVN Heretic Q4_K_M MTP
+    description: Primary thinking/tool-use model; multilingual RVN Heretic Q4_K_M with embedded MTP served by llama.cpp
+    cmd: '${server_bin}
+      server
+      qwen
+      --bin /app/bin/llama-server-qwen
+      --host 0.0.0.0
+      --port ${PORT}
+      -hf ${qwen3_chat_target_hf}
+      --no-mmproj
+      --ctx-size 262144
+      --n-predict 32768
+      --n-gpu-layers all
+      --fit off
+      --parallel 1
+      --kv-unified
+      --spec-type draft-mtp
+      --spec-draft-n-max 2
+      --spec-draft-n-min 0
+      --spec-draft-type-k q8_0
+      --spec-draft-type-v q8_0
+      --flash-attn on
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+      --batch-size 2048
+      --ubatch-size 512
+      --cache-prompt
+      --cache-ram 16384
+      --ctx-checkpoints 32
+      --load-mode mmap
+      --no-warmup
+      --no-webui
+      --jinja
+      --chat-template-file /chat_template/qwen3.8.jinja
+      --reasoning auto
+      --reasoning-preserve
+      --temp 1.0
+      --top-p 0.95
+      --top-k 20
+      --min-p 0.0
+      --repeat-penalty 1.0
       '
-    cmdStop: '${vllm_wrapper_bin}
-      sleep
-      --vllm-url http://127.0.0.1:18000
-      --sleep-level 2
-      --stop-pid ${PID}
-      '
-    env:
-    - VLLM_SERVER_DEV_MODE=1
-    - VLLM_LOGGING_LEVEL=INFO
-    - PYTHONFAULTHANDLER=1
-    - MAX_JOBS=2
-    - NVCC_THREADS=1
+    cmdStop: /bin/kill -TERM ${PID}
   qwen3-embeddings:
     concurrencyLimit: 4
     name: Qwen3 Embeddings 8B
@@ -65,6 +67,7 @@ models:
       server
       qwen
       --bin /app/bin/llama-server-qwen
+      --host 0.0.0.0
       --port ${PORT}
       -hf ${pi_emb_hf_model}
       --ctx-size 40960

@@ -46,7 +46,7 @@ These stable IDs are exposed through `/v1/models`.
 | --- | --- |
 | `llamacpp` | `unsloth/Qwen3.6-27B-GGUF:Q4_K_M` |
 | `turboquant` | `unsloth/Qwen3.6-27B-GGUF:UD-Q5_K_XL` |
-| `qwen` | `gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090` (RTX 5090-specific ModelOpt weights served by vLLM without speculative decoding, full 262,144-token context, FP8 KV cache, and thinking enabled) |
+| `qwen` | `0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF:RVN-Q4_K_M-multilingual-mtp.gguf` (text-only llama.cpp serving at 262,144 tokens with Q8_0 KV cache, native prompt caching, and the embedded MTP head at draft depth two) |
 | `spiritbuun` | target `unsloth/Qwen3.6-27B-GGUF:Q5_K_M`, draft `Ardenzard/Qwen3.6-27B-DFlash-GGUF:Qwen3.6-27B-DFlash-Q5_K_M.gguf` |
 | `lucebox` | target `unsloth/Qwen3.6-27B-GGUF:Q4_K_M`, draft `KingsonHO/Qwen3.6-27B-DFlash:model.safetensors` |
 
@@ -63,11 +63,12 @@ Read this table first if choosing route by task or by mode.
 | `POST /v1/completions` | ✅ | ✅ | ✅ | ✅ | ✅ | Use `qwen3-chat` |
 | `POST /v1/responses` | ✅ | ✅ | ✅ | ✅ | ✅ | Use `qwen3-chat` |
 | `POST /v1/embeddings` | ✅ | ✅ | ✅ | ✅ | ✅ | Use `qwen3-embeddings` |
-| `GET /ui/` | ✅ | ✅ | ✅ | ✅ | ✅ | Built-in `llama-swap` UI |
 
 Important:
 
 - `POST /v1/messages` is specific to `lucebox`; Spiritbuun launches its upstream llama-server without a project-owned messages adapter.
+- The `qwen` profile keeps chat and embeddings in one exclusive swap group: requesting one unloads the other. Its 30-minute `globalTTL` unloads the idle model; other profiles keep automatic idle unload disabled.
+- Qwen thinking is controlled by `/chat_template/qwen3.8.jinja` through `reasoning_effort`: native values are `low`, `medium`, and `xhigh`; clients with additional level names must map them to those values.
 - No reranking model is shipped by the default profiles.
 
 ## Fast smoke tests

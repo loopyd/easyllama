@@ -55,7 +55,7 @@ fi
 
 resolve_mode_config_paths
 
-mapfile -t runtime_config < <(MODE_NAME="${MODE}" "${PYTHON_BIN}" - <<'PY'
+mapfile -t runtime_config < <(EASYLLAMA_ROOT="${REPO_ROOT}" MODE_NAME="${MODE}" "${PYTHON_BIN}" - <<'PY'
 import os
 from easyllama.config import Config
 settings = Config.load(mode_override=os.environ["MODE_NAME"])

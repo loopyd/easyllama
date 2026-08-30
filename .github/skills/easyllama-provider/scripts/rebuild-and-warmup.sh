@@ -21,7 +21,7 @@ fi
 PYTHON_BIN="${PYTHON_BIN:-${DEFAULT_PYTHON}}"
 
 resolve_config_path() {
-  MODE_NAME="${MODE}" "${PYTHON_BIN}" - <<'PY'
+  EASYLLAMA_ROOT="${REPO_ROOT}" MODE_NAME="${MODE}" "${PYTHON_BIN}" - <<'PY'
 import os
 
 from easyllama.config import Config

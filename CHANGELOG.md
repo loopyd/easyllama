@@ -7,6 +7,34 @@ Format follows Keep a Changelog style where possible, based on published release
 
 ## [Unreleased]
 
+## [v0.5.5] - 2026-08-30
+
+Qwen llama.cpp migration with request-aware cross-container lifecycle handling.
+
+### Added
+
+- Added lifecycle sidecars and sleep/wake contracts so llama-swap can unload one backend before activating the other in an exclusive chat/embedding swap group.
+- Added a Qwen-only 30-minute llama-swap idle TTL; other profiles retain the disabled global default.
+- Added exact chat-to-embedding-to-chat regression coverage to catch corrupt output after unload/reload switching.
+
+### Changed
+
+- Switched the Qwen profile from vLLM/LMCache to llama.cpp with the multilingual RVN Heretic Q4_K_M GGUF, full 262,144-token context, Q8_0 KV cache, native RAM-backed prompt caching, and its embedded MTP head at draft depth two.
+- Made the Qwen3.8 template the source of reasoning behavior through `--reasoning auto` and `--reasoning-preserve`; it accepts low, medium, and xhigh effort.
+- Updated the API reference, chat-template guide, provider and tuning skills, launcher metadata, and Qwen example configuration for the shipped backend.
+
+### Fixed
+
+- Corrected skill scripts for repository-root config resolution, llama.cpp's `--n-gpu-layers` spelling, mode-aggregated logs, and the unserved `/ui/` route.
+- Kept chat output coherent after switching to embeddings and back by enforcing serialized lifecycle transitions.
+
+### Validation
+
+- Clean rebuild of the Qwen llama.cpp and llama-swap images; all three containers healthy.
+- Full-context Pi checks passed at every supported thinking level, including a 146,404-token long-context prompt.
+- Public health, model, chat, completion, responses, embedding, and post-embedding chat checks passed.
+- `30 passed, 1 skipped` in the host validation suite.
+
 ## [v0.5.3] - 2026-08-28
 
 Patch release for mode-specific containers, centralized configuration, and the Qwen runtime refresh.

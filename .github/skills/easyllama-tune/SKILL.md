@@ -6,7 +6,7 @@ argument-hint: 'mode=qwen, quants=q5_1, ctx=131072, max_gpu_layers=60'
 
 # Fit Tuning
 
-Tune the first llama.cpp-backed chat alias in a chosen easyllama mode until the active config has a verified fit boundary. The Qwen chat route uses vLLM, so GPU-layer/KV-cache tuning does not apply to that route; use another mode or tune Qwen's vLLM flags directly.
+Tune the first llama.cpp-backed chat alias in a chosen easyllama mode until the active config has a verified fit boundary. The Qwen route is llama.cpp-backed at 262,144 tokens with full GPU placement and Q8_0 KV cache, so the same fit and cache checks apply.
 
 ## Use When
 
@@ -37,7 +37,7 @@ Tune the first llama.cpp-backed chat alias in a chosen easyllama mode until the 
 
 1. Check supported KV cache types.
    - Run [list-supported-cache-types.sh](./scripts/list-supported-cache-types.sh) with `--mode <mode>`.
-   - If the chat backend is vLLM or the desired cache type is unsupported, stop instead of mutating unrelated auxiliary routes.
+   - If the desired cache type is unsupported, stop instead of mutating unrelated auxiliary routes.
 2. Record the anchor.
    - Use [set-chat-tuning.sh](./scripts/set-chat-tuning.sh) with `--mode <mode> --show`, or read the active config.
    - Keep one known-good combination before searching upward.

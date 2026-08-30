@@ -93,7 +93,7 @@ if [[ -x "${REPO_ROOT}/.venv/bin/python" ]]; then
 else
   PYTHON_BIN="${PYTHON_BIN:-python3}"
 fi
-mapfile -t resolved_config < <(MODE_NAME="${MODE}" "${PYTHON_BIN}" - <<'PY'
+mapfile -t resolved_config < <(EASYLLAMA_ROOT="${REPO_ROOT}" MODE_NAME="${MODE}" "${PYTHON_BIN}" - <<'PY'
 import os
 
 from easyllama.config import Config
@@ -134,8 +134,8 @@ check_model_present "${models_json}" "${GEN_MODEL}"
 check_model_present "${models_json}" "${EMBED_MODEL}"
 
 echo "+ POST /v1/chat/completions"
-chat_json="$(request_json POST /v1/chat/completions '{"model":"'"${CHAT_MODEL}"'","messages":[{"role":"user","content":"Reply with exactly ok."}],"max_tokens":16,"stream":false}')"
-assert_jq "chat completion has assistant content" '.choices[0].message.content | type == "string" and length > 0' "${chat_json}"
+chat_json="$(request_json POST /v1/chat/completions '{"model":"'"${CHAT_MODEL}"'","messages":[{"role":"user","content":"Reply with exactly chat-before-embedding-ok."}],"max_tokens":256,"stream":false}')"
+assert_jq "chat completion has exact assistant content" '.choices[0].message.content | ascii_downcase | gsub("[[:space:]]"; "") == "chat-before-embedding-ok"' "${chat_json}"
 
 if [[ "${EXPECT_MESSAGES}" == "1" ]]; then
   echo "+ POST /v1/messages"
@@ -160,7 +160,10 @@ if [[ -n "${EXPECTED_EMBED_DIM}" && "${embed_dim}" != "${EXPECTED_EMBED_DIM}" ]]
   fail "unexpected embedding dimension: got ${embed_dim}, expected ${EXPECTED_EMBED_DIM}"
 fi
 
-echo "+ GET /ui/"
-curl -fsS "${AUTH_ARGS[@]}" "${BASE_URL}/ui/" >/dev/null
+if [[ "${CHAT_MODEL}" != "${EMBED_MODEL}" ]]; then
+  echo "+ POST /v1/chat/completions after embeddings"
+  switched_chat_json="$(request_json POST /v1/chat/completions '{"model":"'"${CHAT_MODEL}"'","messages":[{"role":"user","content":"Reply with exactly chat-after-embedding-ok."}],"max_tokens":256,"stream":false}')"
+  assert_jq "chat completion remains exact after embedding switch" '.choices[0].message.content | ascii_downcase | gsub("[[:space:]]"; "") == "chat-after-embedding-ok"' "${switched_chat_json}"
+fi
 
 echo "all public endpoint checks passed for mode: ${MODE}"

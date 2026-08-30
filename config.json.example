@@ -103,8 +103,6 @@
       },
       "services": [
         "llamaswap",
-        "vllm",
-        "lmcache",
         "llamacpp"
       ]
     },

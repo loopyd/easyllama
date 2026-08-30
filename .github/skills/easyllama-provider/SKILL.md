@@ -78,9 +78,9 @@ Create or update a provider mode for this repository without reintroducing hardc
 
 9. Run the public endpoint regression suite.
 
-   Use the [public endpoint regression script](./scripts/test-public-endpoints.sh). Pass the mode name as the first argument.    The script covers `GET /health`, `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/completions`, `POST /v1/responses`, `POST /v1/embeddings`, and `GET /ui/`. It checks `POST /v1/messages` for `lucebox`, the only shipped mode with a project-owned messages route. Use `--messages` only when validating a newly implemented equivalent route.
+   Use the [public endpoint regression script](./scripts/test-public-endpoints.sh). Pass the mode name as the first argument. The script covers `GET /health`, `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/completions`, `POST /v1/responses`, and `POST /v1/embeddings`. It checks `POST /v1/messages` for `lucebox`, the only shipped mode with a project-owned messages route. Use `--messages` only when validating a newly implemented equivalent route.
 
-   The script validates minimal response shape, not just status codes: advertised model IDs, assistant content for chat-style responses, and non-empty embedding vectors.
+   The script validates minimal response shape, not just status codes: advertised model IDs, assistant content for chat-style responses, and non-empty embedding vectors. For an exclusive chat/embedding swap group, add a final chat request after embeddings and require the exact marker; this catches corrupt output after unload/reload switching.
 
 10. If validation fails, debug locally before expanding scope.
 

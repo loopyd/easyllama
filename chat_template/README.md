@@ -11,9 +11,10 @@ Set the llama-swap model command's `--chat-template-file` argument to a mounted
 path such as:
 
 ```yaml
---chat-template-file /chat_template/qwen3.6.jinja
+--chat-template-file /chat_template/qwen3.8.jinja
 ```
 
-The `qwen` vLLM chat route serves `/chat_template/qwen3.8.jinja` explicitly
-(via `--chat-template`); the auxiliary llama.cpp routes may use templates from
-this directory.
+The `qwen` llama.cpp chat route uses that template with `--reasoning auto` and
+`--reasoning-preserve`. The template accepts `low`, `medium`, and `xhigh`
+reasoning effort (`xhigh` is the default and `high` is accepted as an alias).
+Map any additional client-side thinking levels before sending the request.

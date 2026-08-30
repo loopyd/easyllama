@@ -26,17 +26,14 @@ Project goal: one host command surface, one public port, one shared model cache,
 
 ## At a glance
 
-- One entrypoint: `./run.sh`
-- One API base URL: `http://127.0.0.1:8080` by default; override the validated IPv4, IPv6, or hostname with `--host`
-- Persistent, gitignored host caches under `cache/`: `models/` for Hugging Face repositories, `root/` for `/root/.cache`, `pkg/` for the package manager, and `python/` for pip
-- One shared mmproj asset directory: `mmproj/`
-- Stable model IDs exposed through `/v1/models`
-- Per-model `concurrencyLimit: 4` in llama-swap configs to cap parallel requests
-- Qwen vLLM profile with Unsloth Qwen3.8 NVFP4 weights, 131,072-token context, FP8 KV cache, MTP, and thinking enabled
-- LMCache 0.5.4 with a 16 GiB pinned-RAM L1 cache for Qwen prompt reuse
-- Higher process limit, 32 GiB shared memory, and unlimited memlock for the vLLM runtime
-- `GGML_CUDA_ENABLE_UNIFIED_MEMORY=1` for oversubscribed llama.cpp VRAM on RTX 5090
-- Lazy downloads by default; use warmup for predictable first-request latency
+- One command: `./run.sh`
+- One API URL: `http://127.0.0.1:8080`
+- Shared model downloads under `cache/`
+- Stable model names from `/v1/models`
+- Chat and embedding models share the GPU
+- Only one model is loaded at a time
+- Switching models unloads the old model before loading the next one
+- Use warmup to avoid a slow first request
 
 ## Modes
 
@@ -48,11 +45,11 @@ Choose a mode by backend behavior; the setup flow is the same for all five modes
 | --- | --- | --- | --- | --- |
 | `llamacpp` | Plain llama.cpp path | `easyllama server llamacpp` | `unsloth/Qwen3.6-27B-GGUF:Q4_K_M` | none |
 | `turboquant` | Turboquant KV-cache experiments | `easyllama server turboquant` | `unsloth/Qwen3.6-27B-GGUF:UD-Q5_K_XL` | none |
-| `qwen` | Qwen3.8 RTX 5090 Unsloth NVFP4 + MTP with llama.cpp auxiliary routes | `vllm` via `vllm-wrapper` | `unsloth/Qwen3.8-27B-NVFP4` | none |
+| `qwen` | Qwen3.8 RVN Heretic at its native 262K context on one RTX 5090 | `easyllama server qwen` | `0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF:RVN-Q4_K_M-multilingual-mtp.gguf` | none |
 | `spiritbuun` | buun-llama-cpp DFlash experiments | `easyllama server spiritbuun` | `unsloth/Qwen3.6-27B-GGUF:Q5_K_M` + `Ardenzard/Qwen3.6-27B-DFlash-GGUF:Qwen3.6-27B-DFlash-Q5_K_M.gguf` | none |
 | `lucebox` | Luce dflash/pflash experiments | `easyllama server lucebox` | `unsloth/Qwen3.6-27B-GGUF:Q4_K_M` + `KingsonHO/Qwen3.6-27B-DFlash:model.safetensors` | `POST /v1/messages` |
 
-The `qwen` profile serves `unsloth/Qwen3.8-27B-NVFP4` through vLLM with the checkpoint's native MTP head drafting two tokens per step, as recommended by Unsloth. It uses a 131,072-token context, a fixed 5 GiB FP8 KV cache, prefix caching, text-only loading, 0.94 GPU memory utilization, and the mounted Qwen3.8 template with thinking enabled. LMCache 0.5.4 adds a 16 GiB pinned host-RAM L1 cache through `LMCacheMPConnector`; its 1,600-token chunks match vLLM's Qwen3.8 unified attention block, and separate hybrid object groups plus aligned Mamba caching preserve GDN state reuse. Four scheduler sequences match the four-request public concurrency cap, with a 2,048-token scheduler budget on a 32 GiB RTX 5090. The vLLM 0.28 runtime enables asynchronous scheduling for speculative decoding; the profile explicitly skips FP4 GEMM autotuning and disables expandable CUDA allocator segments because LMCache's CUDA IPC handles require stable physical pages. Its hybrid image keeps the embedding route on llama.cpp; llama-swap stops and reloads the Qwen worker when switching routes because LMCache's CUDA IPC connector is incompatible with vLLM's sleep-mode allocator.
+The `qwen` mode uses llama.cpp for chat and embeddings. Chat runs the multilingual RVN Heretic Q4_K_M model text-only at 262,144 tokens with full GPU placement, Q8_0 KV, Flash Attention, native RAM-backed prompt caching, and its embedded MTP head at draft depth two. vLLM, LMCache, and CPU weight offload are disabled. The Qwen3.8 template preserves reasoning and accepts `low`, `medium`, and `xhigh` reasoning effort (`high` aliases `xhigh`); clients with additional level names must map them first. When a request changes models, llama-swap unloads the current model before loading the next one. This profile sets llama-swap's global idle timer to 30 minutes; other profiles retain the disabled default.
 
 ## System requirements
 
@@ -61,7 +58,7 @@ The `qwen` profile serves `unsloth/Qwen3.8-27B-NVFP4` through vLLM with the chec
 - `docker buildx`
 - NVIDIA drivers and working `nvidia-smi`
 - NVIDIA container runtime in Docker
-- Blackwell GPU for the Qwen profile's NVFP4 checkpoint
+- 32 GiB NVIDIA GPU for the Qwen profile's full 262K context
 - Python `3.11+`
 - `curl`
 - `jq`

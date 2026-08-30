@@ -19,7 +19,7 @@ fi
 
 resolve_mode_config_paths() {
   local -a paths
-  mapfile -t paths < <(MODE_NAME="${MODE}" "${PYTHON_BIN}" - <<'PY'
+  mapfile -t paths < <(EASYLLAMA_ROOT="${REPO_ROOT}" MODE_NAME="${MODE}" "${PYTHON_BIN}" - <<'PY'
 import os
 from easyllama.config import Config
 
@@ -76,10 +76,11 @@ for model in models.values():
         continue
     words = shlex.split(command)
     flag = os.environ["FLAG"]
-    if flag not in words:
+    aliases = ("--gpu-layers", "--n-gpu-layers") if flag == "--gpu-layers" else (flag,)
+    found = next((candidate for candidate in aliases if candidate in words), None)
+    if found is None:
         raise SystemExit(f"{flag} is not supported by the selected chat command")
-    index = words.index(flag)
-    print(words[index + 1])
+    print(words[words.index(found) + 1])
     break
 else:
     raise SystemExit("no chat command found")
@@ -95,12 +96,21 @@ import re
 
 path = Path(os.environ["FILE"])
 text = path.read_text()
-flag = re.escape(os.environ["FLAG"])
-updated, count = re.subn(rf"({flag}\s+)[^\s'\"]+", rf"\g<1>{os.environ['VALUE']}", text, count=1)
-if count != 1:
-    raise SystemExit(f"{os.environ['FLAG']} is not supported by the selected chat command")
-path.write_text(updated)
+flag = os.environ["FLAG"]
+aliases = ("--gpu-layers", "--n-gpu-layers") if flag == "--gpu-layers" else (flag,)
+for candidate in aliases:
+    escaped = re.escape(candidate)
+    updated, count = re.subn(rf"({escaped}\s+)[^\s'\"]+", rf"\g<1>{os.environ['VALUE']}", text, count=1)
+    if count == 1:
+        path.write_text(updated)
+        break
+else:
+    raise SystemExit(f"{flag} is not supported by the selected chat command")
 PY
+}
+
+optional_chat_flag() {
+  chat_flag "$1" "$2" 2>/dev/null || printf 'not set\n'
 }
 
 show_tuning_values() {
@@ -109,7 +119,7 @@ show_tuning_values() {
   printf '  chat_model_alias=%s\n' "$(resolve_chat_model_id "${file}")"
   printf '  ctx_size=%s\n' "$(chat_flag "${file}" --ctx-size)"
   printf '  gpu_layers=%s\n' "$(chat_flag "${file}" --gpu-layers)"
-  printf '  fit=%s\n' "$(chat_flag "${file}" --fit)"
+  printf '  fit=%s\n' "$(optional_chat_flag "${file}" --fit)"
   printf '  cache_type_k=%s\n' "$(chat_flag "${file}" --cache-type-k)"
   printf '  cache_type_v=%s\n' "$(chat_flag "${file}" --cache-type-v)"
 }

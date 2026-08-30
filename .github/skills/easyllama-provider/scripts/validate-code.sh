@@ -51,10 +51,21 @@ expected = {
 }
 assert set(example) == expected
 readme = Path("README.md").read_text()
+api = Path("API.md").read_text()
+template_readme = Path("chat_template/README.md").read_text()
+tune_skill = Path(".github/skills/easyllama-tune/SKILL.md").read_text()
+qwen_server = Path("easyllama/servers/qwen.py").read_text()
 for key in expected:
     assert key in readme, f"README missing config node: {key}"
 for stale in ("`repos`", "`hardware`", "`llama_swap`"):
     assert stale not in readme, f"README contains stale config node: {stale}"
+for text, stale in (
+    (api, "Qwen3.8-27B-NVFP4-RTX5090"),
+    (template_readme, "`qwen` vLLM chat route"),
+    (tune_skill, "Qwen chat route uses vLLM"),
+    (qwen_server, 'backend="vllm"'),
+):
+    assert stale not in text, f"stale Qwen backend documentation: {stale}"
 PY
 
 echo "+ validate project skill scripts"
