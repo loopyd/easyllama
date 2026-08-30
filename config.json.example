@@ -60,7 +60,7 @@
       },
       "llamacpp": {
         "cpu": "xhigh",
-        "ram": "medium",
+        "ram": "high",
         "swap": "xhigh"
       },
       "vllm": {
