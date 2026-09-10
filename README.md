@@ -10,6 +10,7 @@ Project goal: one host command surface, one public port, one shared model cache,
   - [Contents](#contents)
   - [At a glance](#at-a-glance)
   - [Modes](#modes)
+    - [Docker networking](#docker-networking)
   - [System requirements](#system-requirements)
   - [Install](#install)
   - [Quick start](#quick-start)
@@ -36,6 +37,25 @@ Project goal: one host command surface, one public port, one shared model cache,
 - Use warmup to avoid a slow first request
 
 ## Modes
+
+### Docker networking
+
+`docker.network_mode` defaults to `bridge`. Set it to `host` (or set
+`EASYLLAMA_NETWORK_MODE=host`) and restart the selected stack to share the Linux host
+network. The proxy binds to `runtime.host:runtime.host_port`; no ports are
+published. Backend and lifecycle listeners bind only to `127.0.0.1`, starting
+at ports 9000 and 9002 for the two-model profiles. These host ports must be free;
+do not run multiple profiles concurrently. Host mode runs the existing
+llama-swap binary directly under Docker's init process and needs no image rebuild.
+LMCache-dependent profiles reject host mode. Host mode removes network isolation
+and permits host-routed egress; it does not change resource limits or model caches.
+
+The Qwen profile uses `concurrencyLimit: 0` for chat and embeddings. This disables
+llama-swap's early admission rejection, allowing requests to wait during model
+switching rather than returning 429 after four waiting requests. It does not
+increase GPU inference concurrency: both backends retain `--parallel 4`, and the
+models remain in a mutually exclusive swap group. Bound upstream bulk concurrency
+and use timeouts that cover model unloading, loading, queueing and generation.
 
 Choose a mode by backend behavior; the setup flow is the same for all five modes.
 

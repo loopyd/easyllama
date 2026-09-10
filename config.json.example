@@ -18,6 +18,7 @@
     "pids_limit": 256
   },
   "docker": {
+    "network_mode": "bridge",
     "image_name": "easyllama",
     "image_tag": "cuda13",
     "container_name": "easyllama-server-swap",

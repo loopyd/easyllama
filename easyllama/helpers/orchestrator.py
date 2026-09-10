@@ -119,6 +119,7 @@ class ProxyConfigCompiler:
         contracts: list[ContainerContract] = []
         macros = {**self.MACRO_DEFAULTS, **(payload.get("macros") or {})}
         models = payload.get("models", {})
+        host_network = self.settings is not None and self.settings.docker.network_mode == "host"
         for index, (model_id, model) in enumerate(models.items()):
             command = self._expand(str(model["cmd"]).strip(), macros)
             model.pop("cmdStop", None)
@@ -131,7 +132,10 @@ class ProxyConfigCompiler:
             model_name = _NAME.sub("-", model_id.lower()).strip("-")
             name = f"easyllama-{self.mode}-{image}-{model_name}"
             command = _PORT.sub(str(port), command)
-            command = re.sub(r"--host\s+(?:127\.0\.0\.1|localhost)", "--host 0.0.0.0", command)
+            bind_host = "127.0.0.1" if host_network else "0.0.0.0"
+            command = re.sub(
+                r"--host\s+(?:127\.0\.0\.1|localhost|0\.0\.0\.0)", f"--host {bind_host}", command
+            )
             if image is IMAGE.VLLM:
                 for obsolete in ("/app/bin/log-exec", "/app/bin/qwen-lmcache-vllm"):
                     command = command.replace(obsolete, "")
@@ -152,17 +156,18 @@ class ProxyConfigCompiler:
                     lifecycle_port=lifecycle_port,
                 )
             )
+            endpoint_host = "127.0.0.1" if host_network else name
             model.update(
                 {
                     "cmd": (
                         f"curl --fail --silent --show-error --request POST "
-                        f"http://{name}:{lifecycle_port}/run"
+                        f"http://{endpoint_host}:{lifecycle_port}/run"
                     ),
                     "cmdStop": (
                         f"curl --fail --silent --show-error --request POST "
-                        f"http://{name}:{lifecycle_port}/sleep"
+                        f"http://{endpoint_host}:{lifecycle_port}/sleep"
                     ),
-                    "proxy": f"http://{name}:{port}",
+                    "proxy": f"http://{endpoint_host}:{port}",
                     "checkEndpoint": contracts[-1].health_path,
                     "useModelName": model_id,
                 }
@@ -170,6 +175,8 @@ class ProxyConfigCompiler:
         if self.images.requires(IMAGE.LMCACHE) and any(
             contract.image is IMAGE.VLLM for contract in contracts
         ):
+            if host_network:
+                raise SystemExit("host networking is not supported for LMCache dependencies")
             dependency = self.images.dependency(IMAGE.LMCACHE)
             command = tuple(item.replace("{mode}", str(self.mode)) for item in dependency.command)
             if self.settings is not None:

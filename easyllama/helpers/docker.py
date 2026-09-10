@@ -398,6 +398,7 @@ class DockerRuntime:
             command = [
                 "/opt/venv/bin/easyllama",
                 "lifecycle",
+                *(["--host", "127.0.0.1"] if network is None else []),
                 "--port",
                 str(contract.lifecycle_port),
                 "--",
@@ -410,7 +411,7 @@ class DockerRuntime:
             "init": True,
             "name": contract.name,
             "hostname": contract.name,
-            "network": network.name,
+            **({"network_mode": "host"} if network is None else {"network": network.name}),
             "restart_policy": {"Name": "unless-stopped"},
             "security_opt": ["no-new-privileges"],
             "pids_limit": 4096
@@ -488,7 +489,8 @@ class DockerRuntime:
             SystemExit: If the run container operation cannot be completed."""
         self.ensure_daemon()
         self.ensure_nvidia_runtime()
-        network = self.ensure_network()
+        host_network = self.settings.docker.network_mode == "host"
+        network = None if host_network else self.ensure_network()
         auth = self.settings.load_auth()
         caches = self.host_caches()
         for cache in caches:
@@ -577,9 +579,33 @@ class DockerRuntime:
             CONTAINER_PORT=str(self.settings.runtime.container_port),
             EASYLLAMA_MMPROJ_ARG=mmproj_argument,
         )
+        connection = (
+            {"network_mode": "host"}
+            if host_network
+            else {
+                "network": network.name,
+                "ports": {
+                    f"{self.settings.runtime.container_port}/tcp": (
+                        str(self.settings.runtime.host),
+                        self.settings.runtime.host_port,
+                    )
+                },
+            }
+        )
+        process = {"command": ["serve"]}
+        if host_network:
+            process = {
+                "entrypoint": [str(CONTAINERPATH.LLAMA_SWAP)],
+                "command": [
+                    "-config",
+                    container_config_path_value,
+                    "-listen",
+                    f"{self.settings.runtime.host}:{self.settings.runtime.host_port}",
+                ],
+            }
         self.client.containers.run(
             orchestrator.name,
-            command=["serve"],
+            **process,
             detach=True,
             init=True,
             name=self.settings.docker.container_name,
@@ -587,15 +613,9 @@ class DockerRuntime:
             security_opt=["no-new-privileges"],
             pids_limit=self.settings.runtime.pids_limit,
             **self._resources(IMAGE.LLAMASWAP),
-            ports={
-                f"{self.settings.runtime.container_port}/tcp": (
-                    str(self.settings.runtime.host),
-                    self.settings.runtime.host_port,
-                )
-            },
             volumes=volumes,
             environment=environment,
-            network=network.name,
+            **connection,
             labels={
                 "easyllama.managed": "true",
                 "easyllama.mode": self.settings.runtime.mode,

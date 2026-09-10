@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 import re
 import tempfile
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from pydantic import (
     BaseModel,
@@ -454,6 +454,7 @@ class DockerConfig(DataModel):
     image_name: str = config_field("easyllama", env="IMAGE_NAME")
     image_tag: str = "cuda13"
     container_name: str = config_field("easyllama-server-swap", env="CONTAINER_NAME")
+    network_mode: Literal["bridge", "host"] = config_field("bridge", env="NETWORK_MODE")
     cuda: CudaConfig = CudaConfig()
 
 
