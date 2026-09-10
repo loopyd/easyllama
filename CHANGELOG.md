@@ -7,6 +7,27 @@ Format follows Keep a Changelog style where possible, based on published release
 
 ## [Unreleased]
 
+## [v0.6.0] - 2026-09-10
+
+Host networking and reliable queued Qwen model switching.
+
+### Added
+
+- Added opt-in `docker.network_mode=host` and `EASYLLAMA_NETWORK_MODE=host`, while retaining bridge networking by default.
+- Added loopback-only backend and lifecycle endpoints for host mode; the proxy uses the configured host address and port without Docker port publishing.
+- Documented host-port collision constraints, reduced network isolation, and the unsupported LMCache-dependent host-mode combination.
+
+### Fixed
+
+- Removed Qwen's four-request admission rejection so requests waiting for chat/embedding swaps queue instead of receiving premature 429 responses. Backend inference remains limited to four parallel slots per model in the exclusive swap group.
+- Preserved model images, GPU allocations, persistent caches and resource limits during host-network restarts; existing images need no rebuild for this launcher change.
+
+### Validation
+
+- All 30 existing unit tests pass; Ruff, formatting and diff checks pass.
+- Twelve mixed chat/embedding requests passed through the local gateway, including six simultaneous embedding requests; visible chat answers and 4096-dimensional vectors were verified.
+- The external Hindsight integration retained and recalled a synthetic fact in 11.5 seconds after gateway deadlines and retain-only reasoning were configured. Those application-specific settings are not EasyLlama defaults.
+
 ## [v0.5.5] - 2026-08-30
 
 Qwen llama.cpp migration with request-aware cross-container lifecycle handling.
