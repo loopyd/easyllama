@@ -7,6 +7,28 @@ Format follows Keep a Changelog style where possible, based on published release
 
 ## [Unreleased]
 
+## [v0.6.2] - 2026-09-11
+
+Ship the Qwen chat resource profile validated alongside CPU embeddings.
+
+### Changed
+
+- Set Qwen chat generation and batch threads to eight, reduce RAM prompt cache from 16,384 to 4,096 MiB, and reduce context checkpoints from 32 to eight per slot.
+- Preserve chat weights, embedded MTP, GPU placement, Q8 KV precision, reasoning, and four slots sharing the 262,144-token unified context. CPU 0.6B embeddings retain eight threads and four 32,768-token slots.
+- Document the tested external Compose chat limits: eight CPUs, 32 GiB RAM, and 40 GiB total RAM-plus-swap. These are deployment caps, not changes to shared resource-role defaults or other modes. Hindsight's four-way embedding batch setting remains downstream configuration.
+
+### Upgrade notes
+
+- Merge the updated Qwen example into existing ignored overrides and restart through the deployment's owning supervisor. Existing local configuration is not overwritten automatically.
+- This profile-only adjustment needs no inference-image rebuild or vector-index migration. Authentication, model IDs, embedding space and queue admission are unchanged; preserve ongoing ingestion and existing persistent caches.
+
+### Validation
+
+- All 30 existing unit tests pass; the opt-in Docker integration test remains skipped. Ruff, formatting, YAML/macro validation, and diff checks pass. Existing inference images were not rebuilt or cleaned, preserving active ingestion and persistent caches.
+- Earlier same-day validation of the matching running deployment passed 64 isolated embedding vectors per profile, four parallel chat calls, a 17,748-token prompt, and 16 additional vectors with simultaneous chat, recall and ingestion. No errors, OOMs or automatic restarts were observed during that bounded validation window.
+- Four-worker embedding time was approximately unchanged (53.079 to 52.840 seconds). Warm long-chat time was 4.569 to 4.665 seconds; four-chat wall time increased from 1.168 to 1.530 seconds with different generated token counts. These probes do not establish a general throughput improvement or absence of slowdown.
+- Recall still took 27–28 seconds normally and approximately 60 seconds under embedding stress. Database acquisition and reflection-budget warnings remained; this release does not claim to resolve recall latency or complete the ingestion backlog.
+
 ## [v0.6.1] - 2026-09-11
 
 Ship the smaller Qwen embedder already validated in the local deployment.

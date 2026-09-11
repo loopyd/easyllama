@@ -35,6 +35,8 @@ models:
       --n-gpu-layers all
       --fit off
       --parallel 4
+      --threads 8
+      --threads-batch 8
       --kv-unified
       --spec-type draft-mtp
       --spec-draft-n-max 2
@@ -47,8 +49,8 @@ models:
       --batch-size 4096
       --ubatch-size 1024
       --cache-prompt
-      --cache-ram 16384
-      --ctx-checkpoints 32
+      --cache-ram 4096
+      --ctx-checkpoints 8
       --load-mode mmap
       --no-warmup
       --no-webui

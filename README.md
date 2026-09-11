@@ -70,6 +70,19 @@ Choose a mode by backend behavior; the setup flow is the same for all five modes
 
 The `qwen` mode uses llama.cpp for chat and embeddings. Chat runs the multilingual RVN Heretic Q4_K_M model text-only at 262,144 tokens with full GPU placement, Q8_0 KV, Flash Attention, native RAM-backed prompt caching, and its embedded MTP head at draft depth two. vLLM, LMCache, and chat CPU weight offload are disabled. The Qwen3.8 template preserves reasoning and accepts `low`, `medium`, and `xhigh` reasoning effort (`high` aliases `xhigh`); clients with additional level names must map them first. This profile sets llama-swap's global idle timer to 30 minutes; other profiles retain the disabled default.
 
+Qwen chat uses eight generation/batch threads, a 4,096 MiB RAM prompt cache,
+and eight context checkpoints per slot. Its four slots retain the 262,144-token
+shared unified context; this is not four independently allocated contexts.
+These v0.6.2 command defaults preserve weights, MTP, GPU placement, KV precision,
+and reasoning. Existing ignored profiles must be updated explicitly.
+
+The matching external Compose deployment was tested with an eight-CPU quota,
+32 GiB RAM limit and 40 GiB total RAM-plus-swap limit. Those per-container caps
+are deployment settings, not new EasyLlama-wide defaults: the launcher still
+uses the existing host-weighted `resources.roles` configuration for other modes
+and for containers sharing a role. Hindsight's embedding batch concurrency of
+four is likewise a downstream application setting, not a llama-swap admission cap.
+
 Qwen embeddings use the official `Qwen/Qwen3-Embedding-0.6B-GGUF` FP16 file
 on CPU, with eight threads, four parallel slots of 32,768 tokens, 512-token
 batch/microbatch sizes, and last-token pooling. The separate non-exclusive CPU
