@@ -85,8 +85,8 @@ def test_proxy_config_has_explicit_container_contracts() -> None:
     assert "env" not in chat and "type" not in chat
     assert plan.config["routing"]["router"]["settings"]["groups"]["gpu"] == {
         "swap": True,
-        "exclusive": True,
-        "members": ["qwen3-chat", "qwen3-embeddings"],
+        "exclusive": False,
+        "members": ["qwen3-chat"],
     }
     assert plan.config["apiKeys"] == ["secret"]
     assert plan.config["healthCheckTimeout"] == 1800
@@ -110,8 +110,8 @@ def test_proxy_config_has_explicit_container_contracts() -> None:
     assert embeddings.lifecycle_port == 9003
     embeddings_command = " ".join(embeddings.command)
     assert "--host 0.0.0.0" in embeddings_command
-    assert "--ctx-size 163840" in embeddings_command
-    assert "--batch-size 1024 --ubatch-size 1024 --parallel 4" in embeddings_command
+    assert "--ctx-size 131072" in embeddings_command
+    assert "--batch-size 512 --ubatch-size 512 --parallel 4" in embeddings_command
     assert chat.environment == ("HF_TOKEN=${HF_TOKEN}",)
     assert embeddings.environment == ("HF_TOKEN=${HF_TOKEN}",)
 

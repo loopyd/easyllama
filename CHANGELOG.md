@@ -7,6 +7,27 @@ Format follows Keep a Changelog style where possible, based on published release
 
 ## [Unreleased]
 
+## [v0.6.1] - 2026-09-11
+
+Ship the smaller Qwen embedder already validated in the local deployment.
+
+### Changed
+
+- Switched the tracked Qwen profile from Qwen3-Embedding-8B Q5_K_M to the official Qwen3-Embedding-0.6B FP16 GGUF, preserving the `qwen3-embeddings` API ID.
+- Run embeddings on CPU with eight threads, four 32,768-token slots, 512-token batch/microbatch sizes, and last-token pooling. Separate non-exclusive routing groups keep GPU chat resident during embedding requests.
+- Preserve Qwen chat weights/settings, authentication, container resource limits, and other modes' embedding defaults. This configuration-only hotfix requires no inference-image rebuild.
+
+### Upgrade notes
+
+- Merge the updated example into existing ignored Qwen configuration overrides and restart the affected stack; upgrades do not overwrite local settings.
+- Embedding width changes from 4,096 to 1,024. Back up and rebuild downstream vector indexes from source documents; never mix old and new embedding spaces. EasyLlama does not reset application databases.
+
+### Validation
+
+- All 30 existing unit tests pass; the opt-in Docker integration test remains skipped. Ruff, formatting, YAML/macro validation, and diff checks pass.
+- The existing deployment passes authenticated health, discovery, chat, completion, responses, and embedding-before/after-chat checks. Returned vectors are finite, normalized, and 1,024-dimensional; active CPU settings match the shipped profile. Existing images were reused without a clean rebuild to preserve ongoing ingestion.
+- The matching local CPU profile previously processed uncached 768-token embedding probes in 4.65–4.97 seconds versus approximately 21.7 seconds for the old 8B profile. This isolated 4.4–4.7× improvement is not a full-corpus ingestion or retrieval-quality benchmark.
+
 ## [v0.6.0] - 2026-09-10
 
 Host networking and reliable queued Qwen model switching.

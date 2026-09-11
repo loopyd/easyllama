@@ -31,9 +31,8 @@ Project goal: one host command surface, one public port, one shared model cache,
 - One API URL: `http://127.0.0.1:8080`
 - Shared model downloads under `cache/`
 - Stable model names from `/v1/models`
-- Chat and embedding models share the GPU
-- Only one model is loaded at a time
-- Switching models unloads the old model before loading the next one
+- Qwen mode keeps GPU chat and CPU embeddings resident independently
+- Other profiles share the GPU through exclusive model swapping
 - Use warmup to avoid a slow first request
 
 ## Modes
@@ -53,8 +52,8 @@ and permits host-routed egress; it does not change resource limits or model cach
 The Qwen profile uses `concurrencyLimit: 0` for chat and embeddings. This disables
 llama-swap's early admission rejection, allowing requests to wait during model
 switching rather than returning 429 after four waiting requests. It does not
-increase GPU inference concurrency: both backends retain `--parallel 4`, and the
-models remain in a mutually exclusive swap group. Bound upstream bulk concurrency
+increase inference concurrency: both backends retain `--parallel 4`, with GPU
+chat and CPU embeddings in separate non-exclusive groups. Bound upstream bulk concurrency
 and use timeouts that cover model unloading, loading, queueing and generation.
 
 Choose a mode by backend behavior; the setup flow is the same for all five modes.
@@ -69,7 +68,21 @@ Choose a mode by backend behavior; the setup flow is the same for all five modes
 | `spiritbuun` | buun-llama-cpp DFlash experiments | `easyllama server spiritbuun` | `unsloth/Qwen3.6-27B-GGUF:Q5_K_M` + `Ardenzard/Qwen3.6-27B-DFlash-GGUF:Qwen3.6-27B-DFlash-Q5_K_M.gguf` | none |
 | `lucebox` | Luce dflash/pflash experiments | `easyllama server lucebox` | `unsloth/Qwen3.6-27B-GGUF:Q4_K_M` + `KingsonHO/Qwen3.6-27B-DFlash:model.safetensors` | `POST /v1/messages` |
 
-The `qwen` mode uses llama.cpp for chat and embeddings. Chat runs the multilingual RVN Heretic Q4_K_M model text-only at 262,144 tokens with full GPU placement, Q8_0 KV, Flash Attention, native RAM-backed prompt caching, and its embedded MTP head at draft depth two. vLLM, LMCache, and CPU weight offload are disabled. The Qwen3.8 template preserves reasoning and accepts `low`, `medium`, and `xhigh` reasoning effort (`high` aliases `xhigh`); clients with additional level names must map them first. When a request changes models, llama-swap unloads the current model before loading the next one. This profile sets llama-swap's global idle timer to 30 minutes; other profiles retain the disabled default.
+The `qwen` mode uses llama.cpp for chat and embeddings. Chat runs the multilingual RVN Heretic Q4_K_M model text-only at 262,144 tokens with full GPU placement, Q8_0 KV, Flash Attention, native RAM-backed prompt caching, and its embedded MTP head at draft depth two. vLLM, LMCache, and chat CPU weight offload are disabled. The Qwen3.8 template preserves reasoning and accepts `low`, `medium`, and `xhigh` reasoning effort (`high` aliases `xhigh`); clients with additional level names must map them first. This profile sets llama-swap's global idle timer to 30 minutes; other profiles retain the disabled default.
+
+Qwen embeddings use the official `Qwen/Qwen3-Embedding-0.6B-GGUF` FP16 file
+on CPU, with eight threads, four parallel slots of 32,768 tokens, 512-token
+batch/microbatch sizes, and last-token pooling. The separate non-exclusive CPU
+group lets embedding requests run without unloading GPU chat. The stable
+`qwen3-embeddings` ID now returns 1,024-dimensional vectors instead of 4,096.
+Rebuild downstream vector indexes from their source documents; never mix vectors
+from the old and new models, even if a client requests equal dimensions.
+
+Existing ignored `config/config.qwen.yml` overrides are not overwritten by an
+upgrade. Merge the embedding command and routing groups from the updated example
+before restarting. The portable example downloads the named FP16 file; deployments
+requiring an immutable artifact can use `--model` with a revision/checksum-verified
+local copy. No launcher or inference-binary changes are required for this hotfix.
 
 ## System requirements
 

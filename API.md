@@ -38,7 +38,11 @@ These stable IDs are exposed through `/v1/models`.
 | Model ID | Purpose | Default source |
 | --- | --- | --- |
 | `qwen3-chat` | Primary chat and generation model | mode-dependent |
-| `qwen3-embeddings` | Dense embeddings | `Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M` |
+| `qwen3-embeddings` | Dense embeddings | `qwen`: `Qwen/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-f16.gguf`; other modes: `Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M` |
+
+In `qwen` mode, embeddings have 1,024 dimensions and a 32,768-token context per
+slot. Upgrading from the 8B model requires re-embedding the corpus and rebuilding
+vector indexes; unchanged endpoint/model IDs do not imply compatible vectors.
 
 ### `qwen3-chat` default by mode
 
@@ -67,7 +71,7 @@ Read this table first if choosing route by task or by mode.
 Important:
 
 - `POST /v1/messages` is specific to `lucebox`; Spiritbuun launches its upstream llama-server without a project-owned messages adapter.
-- The `qwen` profile keeps chat and embeddings in one exclusive swap group: requesting one unloads the other. Its 30-minute `globalTTL` unloads the idle model; other profiles keep automatic idle unload disabled.
+- The `qwen` profile runs GPU chat and CPU embeddings in separate non-exclusive groups, so embedding requests do not unload chat. Its 30-minute `globalTTL` unloads idle models; other profiles keep automatic idle unload disabled.
 - Qwen thinking is controlled by `/chat_template/qwen3.8.jinja` through `reasoning_effort`: native values are `low`, `medium`, and `xhigh`; clients with additional level names must map them to those values.
 - No reranking model is shipped by the default profiles.
 

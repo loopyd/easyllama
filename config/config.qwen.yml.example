@@ -6,13 +6,17 @@ routing:
       groups:
         gpu:
           swap: true
-          exclusive: true
+          exclusive: false
           members:
           - qwen3-chat
+        cpu:
+          swap: false
+          exclusive: false
+          members:
           - qwen3-embeddings
 macros:
   qwen3_chat_target_hf: 0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF:RVN-Q4_K_M-multilingual-mtp.gguf
-  pi_emb_hf_model: Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M
+  pi_emb_hf_model: Qwen/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-f16.gguf
 models:
   qwen3-chat:
     concurrencyLimit: 0
@@ -61,7 +65,7 @@ models:
     cmdStop: /bin/kill -TERM ${PID}
   qwen3-embeddings:
     concurrencyLimit: 0
-    name: Qwen3 Embeddings 8B
+    name: Qwen3 Embeddings 0.6B FP16
     description: Dense embedding model for vector search, RAG, similarity
     cmd: '${server_bin}
       server
@@ -70,15 +74,20 @@ models:
       --host 0.0.0.0
       --port ${PORT}
       -hf ${pi_emb_hf_model}
-      --ctx-size 163840
-      --batch-size 1024
-      --ubatch-size 1024
+      --n-gpu-layers 0
+      --device none
+      --threads 8
+      --threads-batch 8
+      --ctx-size 131072
+      --batch-size 512
+      --ubatch-size 512
       --parallel 4
       --flash-attn on
       --cache-type-k f16
       --cache-type-v f16
       --no-mmap
       --embedding
+      --pooling last
       --no-warmup
       '
     cmdStop: /bin/kill -TERM ${PID}
