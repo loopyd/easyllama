@@ -67,13 +67,14 @@ Read this table first if choosing route by task or by mode.
 | `POST /v1/completions` | ✅ | ✅ | ✅ | ✅ | ✅ | Use `qwen3-chat` |
 | `POST /v1/responses` | ✅ | ✅ | ✅ | ✅ | ✅ | Use `qwen3-chat` |
 | `POST /v1/embeddings` | ✅ | ✅ | ✅ | ✅ | ✅ | Use `qwen3-embeddings` |
+| `POST /v1/rerank` | ❌ | ❌ | ✅ | ❌ | ❌ | Qwen mode: use `qwen3-reranker` |
 
 Important:
 
 - `POST /v1/messages` is specific to `lucebox`; Spiritbuun launches its upstream llama-server without a project-owned messages adapter.
-- The `qwen` profile runs GPU chat and CPU embeddings in separate non-exclusive groups, so embedding requests do not unload chat. Its 30-minute `globalTTL` unloads idle models; other profiles keep automatic idle unload disabled.
+- The `qwen` profile keeps GPU embeddings and the BGE reranker together in a non-swapping search group. Chat and search groups are mutually exclusive. Search models have `ttl: 0`; chat uses the 30-minute global idle timer.
 - Qwen thinking is controlled by `/chat_template/qwen3.8.jinja` through `reasoning_effort`: native values are `low`, `medium`, and `xhigh`; clients with additional level names must map them to those values.
-- No reranking model is shipped by the default profiles.
+- Only Qwen mode ships a reranker. Its `qwen3-reranker` identifier denotes the Qwen-mode endpoint, not a Qwen-family model: the weights are BGE reranker v2 M3 Q8_0. Send `model`, `query`, `documents` and optional `top_n`; results include document indices and relevance scores. Use the authenticated proxy rather than private native/lifecycle ports.
 
 ## Fast smoke tests
 

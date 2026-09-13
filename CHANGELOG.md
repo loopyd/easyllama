@@ -7,6 +7,30 @@ Format follows Keep a Changelog style where possible, based on published release
 
 ## [Unreleased]
 
+## [v0.6.3] - 2026-09-13
+
+Compact GPU reranking in Qwen mode, co-resident with GPU embeddings.
+
+### Added
+
+- Qwen mode now exposes `qwen3-reranker` at `/v1/rerank`, using the compact BGE reranker v2 M3 Q8_0 with two native GPU slots. Existing inference images support this endpoint; no native-code rebuild is required.
+- Keep full-GPU Qwen embeddings and reranking resident together in an exclusive search group with idle unloading disabled. Large Qwen chat swaps out the search group to respect shared VRAM; chat retains its 30-minute idle timer.
+- Keep proxy admission rejection disabled for all three models; bound upstream concurrency and let native slots queue work. The deployed reranker artifact is revision/size/SHA-256 pinned in dotfiles.
+
+### Upgrade notes
+
+- Merge the Qwen example into existing local overrides; upgrades do not overwrite them. The `qwen3-reranker` identifier serves BGE weights, not a Qwen-family reranker. Embedding identity, dimensions, precision and index compatibility remain unchanged from the 0.6B deployment.
+- The portable example resolves named Hugging Face files. Immutable deployments should use verified local model paths; dotfiles captures the reranker revision, size and SHA-256, authenticated proxy, and four-container systemd supervisor.
+- Existing inference images were reused. This release updates the source package/profile, not the historical build identity of those containers. Chat and the search group remain mutually exclusive to preserve VRAM headroom.
+- Hindsight uses its built-in Cohere-compatible HTTP adapter against authenticated local EasyLlama, with explicit user approval because 9router has no rerank route. LLMs and embeddings still use 9router; no Hindsight, plugin or 9router native code was changed.
+
+### Validation
+
+- All 30 existing unit tests pass, along with related Ruff, formatting, YAML/rendering and diff checks. No regression tests or native runtime dependencies were added.
+- Five small semantic rerank requests passed: 1.313 seconds cold and 10–21 ms warm. Four concurrent 300-document batches completed in 2.508 seconds; all 1,200 scores were finite, every document index was returned, and each known relevant document ranked first. These synthetic cases do not establish general relevance parity with FlashRank.
+- Four real loaded Hindsight searches that previously all timed out at 90 seconds completed in 4.504–10.438 seconds. A repeated burst completed in 3.987–9.302 seconds, with Hindsight CPU samples of 0.90–10.59%, versus earlier CPU-reranking saturation near 800%. These bounded observations are not a full-corpus ingestion benchmark.
+- Search → local Qwen chat → search passed; 28 backend samples observed search co-residency and chat alone, with no observed overlap. Anonymous reranking returned 401, private sockets remained loopback-only, and service health checks passed. No new timeout, JSON, assertion or OOM errors appeared in the checked post-migration logs.
+
 ## [v0.6.2] - 2026-09-11
 
 Ship the Qwen chat resource profile validated alongside CPU embeddings.

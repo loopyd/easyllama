@@ -31,7 +31,7 @@ Project goal: one host command surface, one public port, one shared model cache,
 - One API URL: `http://127.0.0.1:8080`
 - Shared model downloads under `cache/`
 - Stable model names from `/v1/models`
-- Qwen mode keeps GPU chat and CPU embeddings resident independently
+- Qwen mode keeps GPU embeddings and compact reranking resident together, swapping them for large chat
 - Other profiles share the GPU through exclusive model swapping
 - Use warmup to avoid a slow first request
 
@@ -49,11 +49,12 @@ llama-swap binary directly under Docker's init process and needs no image rebuil
 LMCache-dependent profiles reject host mode. Host mode removes network isolation
 and permits host-routed egress; it does not change resource limits or model caches.
 
-The Qwen profile uses `concurrencyLimit: 0` for chat and embeddings. This disables
+The Qwen profile uses `concurrencyLimit: 0` for chat, embeddings and reranking. This disables
 llama-swap's early admission rejection, allowing requests to wait during model
 switching rather than returning 429 after four waiting requests. It does not
-increase inference concurrency: both backends retain `--parallel 4`, with GPU
-chat and CPU embeddings in separate non-exclusive groups. Bound upstream bulk concurrency
+increase inference concurrency: chat and embeddings retain `--parallel 4`, while
+reranking has two native slots. GPU chat and the co-resident search models occupy
+mutually exclusive groups. Bound upstream bulk concurrency
 and use timeouts that cover model unloading, loading, queueing and generation.
 
 Choose a mode by backend behavior; the setup flow is the same for all five modes.
@@ -64,7 +65,7 @@ Choose a mode by backend behavior; the setup flow is the same for all five modes
 | --- | --- | --- | --- | --- |
 | `llamacpp` | Plain llama.cpp path | `easyllama server llamacpp` | `unsloth/Qwen3.6-27B-GGUF:Q4_K_M` | none |
 | `turboquant` | Turboquant KV-cache experiments | `easyllama server turboquant` | `unsloth/Qwen3.6-27B-GGUF:UD-Q5_K_XL` | none |
-| `qwen` | Qwen3.8 RVN Heretic at its native 262K context on one RTX 5090 | `easyllama server qwen` | `0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF:RVN-Q4_K_M-multilingual-mtp.gguf` | none |
+| `qwen` | Qwen3.8 RVN Heretic at its native 262K context on one RTX 5090 | `easyllama server qwen` | `0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF:RVN-Q4_K_M-multilingual-mtp.gguf` | `POST /v1/rerank` |
 | `spiritbuun` | buun-llama-cpp DFlash experiments | `easyllama server spiritbuun` | `unsloth/Qwen3.6-27B-GGUF:Q5_K_M` + `Ardenzard/Qwen3.6-27B-DFlash-GGUF:Qwen3.6-27B-DFlash-Q5_K_M.gguf` | none |
 | `lucebox` | Luce dflash/pflash experiments | `easyllama server lucebox` | `unsloth/Qwen3.6-27B-GGUF:Q4_K_M` + `KingsonHO/Qwen3.6-27B-DFlash:model.safetensors` | `POST /v1/messages` |
 
@@ -84,9 +85,10 @@ and for containers sharing a role. Hindsight's embedding batch concurrency of
 four is likewise a downstream application setting, not a llama-swap admission cap.
 
 Qwen embeddings use the official `Qwen/Qwen3-Embedding-0.6B-GGUF` FP16 file
-on CPU, with eight threads, four parallel slots of 32,768 tokens, 512-token
-batch/microbatch sizes, and last-token pooling. The separate non-exclusive CPU
-group lets embedding requests run without unloading GPU chat. The stable
+on GPU, with four threads, four parallel slots of 32,768 tokens, 512-token
+batch/microbatch sizes, and last-token pooling. A non-swapping search group keeps
+embeddings and BGE reranking together with idle unloading disabled; chat swaps
+out both when it needs VRAM. The stable
 `qwen3-embeddings` ID now returns 1,024-dimensional vectors instead of 4,096.
 Rebuild downstream vector indexes from their source documents; never mix vectors
 from the old and new models, even if a client requests equal dimensions.
@@ -96,6 +98,14 @@ upgrade. Merge the embedding command and routing groups from the updated example
 before restarting. The portable example downloads the named FP16 file; deployments
 requiring an immutable artifact can use `--model` with a revision/checksum-verified
 local copy. No launcher or inference-binary changes are required for this hotfix.
+
+Qwen mode also exposes `qwen3-reranker` using BGE reranker v2 M3 Q8_0 at
+`POST /v1/rerank`. This is the mode's endpoint name, not a Qwen-family model.
+It uses full GPU placement, two native slots sharing a 16,384-token context,
+and two CPU threads. The tested deployment caps its container at 2 CPUs,
+8 GiB RAM/no extra swap and 4 GiB shared memory. An external Cohere-compatible
+client can target this authenticated endpoint directly without moving embedding
+traffic or rebuilding vector indexes. See [API details](API.md#endpoint-matrix).
 
 ## System requirements
 

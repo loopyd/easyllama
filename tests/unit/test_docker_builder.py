@@ -79,13 +79,13 @@ def test_runtime_base_has_no_backend() -> None:
 def test_proxy_config_has_explicit_container_contracts() -> None:
     plan = ProxyConfigCompiler(MODE.QWEN).compile(Path("config/config.qwen.yml.example"), "secret")
     chat = plan.config["models"]["qwen3-chat"]
-    assert chat["cmd"].endswith("http://easyllama-qwen-llamacpp-qwen3-chat:9002/run")
-    assert chat["cmdStop"].endswith("http://easyllama-qwen-llamacpp-qwen3-chat:9002/sleep")
+    assert chat["cmd"].endswith("http://easyllama-qwen-llamacpp-qwen3-chat:9003/run")
+    assert chat["cmdStop"].endswith("http://easyllama-qwen-llamacpp-qwen3-chat:9003/sleep")
     assert chat["proxy"] == "http://easyllama-qwen-llamacpp-qwen3-chat:9000"
     assert "env" not in chat and "type" not in chat
     assert plan.config["routing"]["router"]["settings"]["groups"]["gpu"] == {
         "swap": True,
-        "exclusive": False,
+        "exclusive": True,
         "members": ["qwen3-chat"],
     }
     assert plan.config["apiKeys"] == ["secret"]
@@ -95,9 +95,9 @@ def test_proxy_config_has_explicit_container_contracts() -> None:
     assert plan.config["globalTTL"] == 1800
     assert "ttl" not in chat
     assert "macros" not in plan.config
-    chat, embeddings = plan.containers
+    chat, embeddings = plan.containers[:2]
     assert chat.health_path == "/v1/models" and chat.stop_signal == "SIGTERM"
-    assert chat.lifecycle_port == 9002
+    assert chat.lifecycle_port == 9003
     chat_command = " ".join(chat.command)
     assert "/app/bin/llama-server-qwen" in chat_command
     assert "RVN-Q4_K_M-multilingual-mtp.gguf" in chat_command
@@ -107,7 +107,7 @@ def test_proxy_config_has_explicit_container_contracts() -> None:
     assert "--cache-type-k q8_0 --cache-type-v q8_0" in chat_command
     assert "--spec-type draft-mtp --spec-draft-n-max 2" in chat_command
     assert embeddings.health_path == "/v1/models"
-    assert embeddings.lifecycle_port == 9003
+    assert embeddings.lifecycle_port == 9004
     embeddings_command = " ".join(embeddings.command)
     assert "--host 0.0.0.0" in embeddings_command
     assert "--ctx-size 131072" in embeddings_command

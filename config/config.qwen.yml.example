@@ -6,17 +6,19 @@ routing:
       groups:
         gpu:
           swap: true
-          exclusive: false
+          exclusive: true
           members:
           - qwen3-chat
-        cpu:
+        search:
           swap: false
-          exclusive: false
+          exclusive: true
           members:
           - qwen3-embeddings
+          - qwen3-reranker
 macros:
   qwen3_chat_target_hf: 0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF:RVN-Q4_K_M-multilingual-mtp.gguf
   pi_emb_hf_model: Qwen/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-f16.gguf
+  qwen3_reranker_hf: gpustack/bge-reranker-v2-m3-GGUF:bge-reranker-v2-m3-Q8_0.gguf
 models:
   qwen3-chat:
     concurrencyLimit: 0
@@ -66,6 +68,7 @@ models:
       '
     cmdStop: /bin/kill -TERM ${PID}
   qwen3-embeddings:
+    ttl: 0
     concurrencyLimit: 0
     name: Qwen3 Embeddings 0.6B FP16
     description: Dense embedding model for vector search, RAG, similarity
@@ -76,10 +79,11 @@ models:
       --host 0.0.0.0
       --port ${PORT}
       -hf ${pi_emb_hf_model}
-      --n-gpu-layers 0
-      --device none
-      --threads 8
-      --threads-batch 8
+      --n-gpu-layers all
+      --device CUDA0
+      --fit off
+      --threads 4
+      --threads-batch 4
       --ctx-size 131072
       --batch-size 512
       --ubatch-size 512
@@ -91,5 +95,33 @@ models:
       --embedding
       --pooling last
       --no-warmup
+      '
+    cmdStop: /bin/kill -TERM ${PID}
+  qwen3-reranker:
+    ttl: 0
+    concurrencyLimit: 0
+    name: BGE Reranker v2 M3 Q8_0
+    description: Compact GPU cross-encoder for query-document relevance, co-resident with embeddings
+    cmd: '${server_bin}
+      server
+      qwen
+      --bin /app/bin/llama-server-qwen
+      --host 0.0.0.0
+      --port ${PORT}
+      -hf ${qwen3_reranker_hf}
+      --n-gpu-layers all
+      --device CUDA0
+      --fit off
+      --threads 2
+      --threads-batch 2
+      --ctx-size 16384
+      --batch-size 8192
+      --ubatch-size 8192
+      --parallel 2
+      --embedding
+      --pooling rank
+      --reranking
+      --no-warmup
+      --no-webui
       '
     cmdStop: /bin/kill -TERM ${PID}
