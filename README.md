@@ -42,9 +42,14 @@ Project goal: one host command surface, one public port, one shared model cache,
 `docker.network_mode` defaults to `bridge`. Set it to `host` (or set
 `EASYLLAMA_NETWORK_MODE=host`) and restart the selected stack to share the Linux host
 network. The proxy binds to `runtime.host:runtime.host_port`; no ports are
-published. Backend and lifecycle listeners bind only to `127.0.0.1`, starting
-at ports 9000 and 9002 for the two-model profiles. These host ports must be free;
-do not run multiple profiles concurrently. Host mode runs the existing
+published. Backend and lifecycle listeners bind only to `127.0.0.1`: each model
+reserves two consecutive ports (its API port plus a backend slot at +1 for
+multi-socket backends such as FreeToken's torch.distributed store), lifecycle
+listeners follow the reserved band, and each profile declares a distinct
+`startPort` base (Qwen 9000, GLM-5.3 Flash 9100, llama.cpp 9200, TurboQuant 9300,
+SpiritBuun 9400, Lucebox 9500) so co-resident models from another profile cannot
+collide. These host ports must be free; do not run multiple profiles
+concurrently. Host mode runs the existing
 llama-swap binary directly under Docker's init process and needs no image rebuild.
 LMCache-dependent profiles reject host mode. Host mode removes network isolation
 and permits host-routed egress; it does not change resource limits or model caches.
@@ -57,7 +62,7 @@ reranking has two native slots. GPU chat and the co-resident search models occup
 mutually exclusive groups. Bound upstream bulk concurrency
 and use timeouts that cover model unloading, loading, queueing and generation.
 
-Choose a mode by backend behavior; the setup flow is the same for all five modes.
+Choose a mode by backend behavior; the setup flow is the same for all six modes.
 
 - Mode-specific defaults live in the tracked templates under `config/`.
 
@@ -68,6 +73,9 @@ Choose a mode by backend behavior; the setup flow is the same for all five modes
 | `qwen` | Qwen3.8 RVN Heretic at its native 262K context on one RTX 5090 | `easyllama server qwen` | `0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF:RVN-Q4_K_M-multilingual-mtp.gguf` | `POST /v1/rerank` |
 | `spiritbuun` | buun-llama-cpp DFlash experiments | `easyllama server spiritbuun` | `unsloth/Qwen3.6-27B-GGUF:Q5_K_M` + `Ardenzard/Qwen3.6-27B-DFlash-GGUF:Qwen3.6-27B-DFlash-Q5_K_M.gguf` | none |
 | `lucebox` | Luce dflash/pflash experiments | `easyllama server lucebox` | `unsloth/Qwen3.6-27B-GGUF:Q4_K_M` + `KingsonHO/Qwen3.6-27B-DFlash:model.safetensors` | `POST /v1/messages` |
+| `glm5.3-flash` | GLM-5.3 Flash 320B MoE (18B active) on the FreeToken runtime | `easyllama server glm5.3-flash` | `RedHatAI/GLM-5.3-Flash-NVFP4` (NVFP4 HF checkpoint, FreeToken offload) | `POST /v1/messages` |
+
+The `glm5.3-flash` mode runs the FreeToken runtime, not llama.cpp: FreeToken is installed from the pinned `FlashML-org/FreeToken` repository into an isolated venv (`/opt/ft-venv`) inside the dedicated `freetoken` image role, and the runtime stage merges the CUDA 13 compiler (nvcc) because FreeToken JIT-compiles its kernels on first use. GLM-5.3 Flash is a 320B-total / 18B-active MoE with hybrid linear (KDA) plus sparse (DSA) attention; only the eleven DSA layers grow KV, so the full 262,144-token context costs about 2.8 GiB of KV (bf16) and the profile pins it at `--max-seq-len-override`, `--num-tokens` and `--kv-reserve-tokens`. NVFP4 routed experts live off-VRAM: FreeToken keeps an LRU expert cache in host RAM and streams misses from the checkpoint on the host SSD (`cache/models`, ~160 GiB download on first start). The mode exposes `glm53-chat` and the 30-minute idle timer keeps the model warm.
 
 The `qwen` mode uses llama.cpp for chat and embeddings. Chat runs the multilingual RVN Heretic Q4_K_M model text-only at 262,144 tokens with full GPU placement, Q8_0 KV, Flash Attention, native RAM-backed prompt caching, and its embedded MTP head at draft depth two. vLLM, LMCache, and chat CPU weight offload are disabled. The Qwen3.8 template preserves reasoning and accepts `low`, `medium`, and `xhigh` reasoning effort (`high` aliases `xhigh`); clients with additional level names must map them first. This profile sets llama-swap's global idle timer to 30 minutes; other profiles retain the disabled default.
 
@@ -217,11 +225,18 @@ Most-used host commands through `./run.sh`.
 | `./run.sh logs` | Follow aggregated, container-tagged logs for the selected mode stack |
 | `./run.sh logs --tail N` | Merge the last N lines per selected-mode container by Docker timestamp |
 | `./run.sh status` | Show runtime status and built images |
-| `./run.sh clean` | Remove the current mode stack, private network, images, and all host caches |
-| `./run.sh clean --all-images` | Remove all mode images and the runtime container; empty all host caches, including models |
+| `./run.sh clean` | Remove the current mode stack, private network, and images; host caches are kept |
+| `./run.sh clean --all-images` | Remove all mode images and the runtime container; host caches are kept |
+| `./run.sh clean --wipe-cache` | Same, plus wipe every host cache (`root`, `pkg`, `python`, `models`) |
+| `./run.sh clean --wipe-cache models` | Same, plus wipe only the listed caches (comma-separated: `root`, `pkg`, `python`, `models`) |
 | `./run.sh serve` | Run `llama-swap` inside container |
 | `./run.sh server ...` | Run mode-specific upstream server directly |
 | `./run.sh help` | Show CLI help |
+
+`clean` no longer touches host caches by default: repeat cleans while debugging keep `models`,
+`pkg`, and `python` warm, so re-downloads (model weights, package archives) do not delay the next
+start or image build. Wipe them explicitly with `--wipe-cache [list]` when a cache is corrupt or
+you want a cold-cache test.
 
 ## File map
 
@@ -296,6 +311,7 @@ Fast map from symptom to likely fix.
 | --- | --- | --- |
 | `docker buildx` build fails fast | Buildx missing or not bootstrapped | Install Buildx, then run `docker buildx inspect --bootstrap` |
 | First request is slow | Model download or first load happening lazily | Run `./run.sh warmup ...` first |
+| Warmup fails with `upstream command exited prematurely` | Model file missing from `cache/models` (fresh or wiped cache) | Run `./run.sh warmup <model>` again: `-hf` specs and hub-cache `--model` references are now re-downloaded host-side, pinned to their snapshot commit, before the container loads the model |
 | `POST /v1/messages` fails | The route is only supported by `lucebox` | Restart with `./run.sh --mode lucebox start` |
 | `/v1/models` returns `401` | API key enabled | Send `Authorization: Bearer <api_key>` |
 | Config edit does nothing | Wrong mode file edited or `EASYLLAMA_LS_CONFIG_FILE` set | Check active mode and config path |

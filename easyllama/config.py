@@ -51,6 +51,7 @@ class MODE(StrEnum):
     QWEN = "qwen"
     SPIRITBUUN = "spiritbuun"
     LUCEBOX = "lucebox"
+    GLM53FLASH = "glm5.3-flash"
 
 
 class IMAGE(StrEnum):
@@ -60,6 +61,7 @@ class IMAGE(StrEnum):
     VLLM = "vllm"
     LLAMACPP = "llamacpp"
     LMCACHE = "lmcache"
+    FREETOKEN = "freetoken"
 
 
 class CPU_WEIGHT(IntEnum):
@@ -550,6 +552,7 @@ class Config(DataModel):
                     "llamacpp": {"cpu": "xhigh", "ram": "medium", "swap": "xhigh"},
                     "vllm": {"cpu": "xhigh", "ram": "medium", "swap": "medium"},
                     "lmcache": {"cpu": "medium", "ram": "medium", "swap": "medium"},
+                    "freetoken": {"cpu": "xhigh", "ram": "xhigh", "swap": "medium"},
                 },
             },
             "locale": {
@@ -591,6 +594,13 @@ class Config(DataModel):
                     },
                     "services": ["llamaswap", "llamacpp"],
                     "hub": {"url": "https://github.com/Luce-Org/lucebox-hub.git", "ref": "main"},
+                },
+                "glm5.3-flash": {
+                    "repo": {
+                        "url": "https://github.com/FlashML-org/FreeToken.git",
+                        "ref": "main",
+                    },
+                    "services": ["llamaswap", "freetoken"],
                 },
             },
             "warmup": {},

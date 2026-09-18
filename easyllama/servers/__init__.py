@@ -5,6 +5,7 @@ from __future__ import annotations
 from pydantic.dataclasses import dataclass
 
 from .base import BuildSource, RuntimeModeMetadata, ServerBase, Spec, server_metadata
+from .glm53flash import Glm53FlashServer
 from .llamacpp import LlamaCppServer
 from .lucebox import LuceboxServer
 from .qwen import QwenServer
@@ -26,6 +27,7 @@ class ServerDef:
 
 _SERVERS: dict[str, type[ServerBase]] = {
     LlamaCppServer.name: LlamaCppServer,
+    Glm53FlashServer.name: Glm53FlashServer,
     TurboquantServer.name: TurboquantServer,
     QwenServer.name: QwenServer,
     LuceboxServer.name: LuceboxServer,

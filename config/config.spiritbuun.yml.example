@@ -1,3 +1,4 @@
+startPort: 9400
 macros:
   emb_hf_model: Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M
   draft_context: '256'

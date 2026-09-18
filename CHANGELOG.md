@@ -7,6 +7,31 @@ Format follows Keep a Changelog style where possible, based on published release
 
 ## [Unreleased]
 
+### Added
+
+- `glm5.3-flash` mode serving GLM-5.3 Flash (320B total / 18B active MoE, hybrid KDA/DSA attention) on the FreeToken runtime. FreeToken is a first-class `freetoken` image role: it is installed from the pinned `FlashML-org/FreeToken` repository into an isolated venv (`/opt/ft-venv`) in the `freetoken-builder` stage and shipped by the `runtime-freetoken` stage, which also merges the CUDA 13 compiler (nvcc) for FreeToken's JIT-compiled kernels. The mode is not derived from the llama.cpp runtime chain.
+- The mode exposes `glm53-chat` backed by the `RedHatAI/GLM-5.3-Flash-NVFP4` checkpoint (NVFP4, FreeToken known-good), cached under `cache/models` on the host SSD. NVFP4 routed experts run off-VRAM through FreeToken MoE offload (host RAM LRU expert cache with NVMe-backed streaming), and the profile pins the full 262,144-token context (about 2.8 GiB of KV) via `--max-seq-len-override`, `--num-tokens` and `--kv-reserve-tokens`.
+- FreeToken-native API surface for the mode: `POST /v1/messages`, `POST /v1/responses`, and `GET /v1/stats` alongside the OpenAI-compatible chat routes.
+
+### Changed
+
+- `clean` no longer wipes host caches by default. Pass `--wipe-cache [root,pkg,python,models]` (empty for all) to opt in. Repeated wipes during debugging force re-downloads (model weights, package archives) and delay the next start or image build.
+
+### Upgrade notes
+
+- Build the mode before first start: `./run.sh --mode glm5.3-flash build` compiles the `llamaswap` and `freetoken` images; the first `warmup` downloads the ~160 GiB checkpoint into `cache/models`.
+- Existing modes and their images are unchanged; the Qwen profile, its container and model cache are untouched by this addition.
+
+### Fixed
+
+- The `freetoken-builder` stage now installs the C++ toolchain (`g++`, `make`, `ninja`, Python development headers) and merges the CUDA 13 toolkit headers: FreeToken's wheel build compiles native CUDA extensions at install time, so the builder previously failed with `g++: No such file or directory` and missing `cuda_runtime_api.h`/`Python.h`. `./run.sh --mode glm5.3-flash build` now completes.
+- `start` is idempotent again: stale containers from an earlier run (a stopped orchestrator or dependency containers left behind by a crash) are swept before new containers are created, so stop followed by start no longer fails with a Docker container-name conflict.
+- Hugging Face model resolution is explicitly cache-first: a warm `warmup` resolves files and snapshots from the local cache without any Hub API traffic, and the log now states whether each model file or snapshot is served from cache or downloaded.
+- The default project root resolves to the repository root that contains the `easyllama` package instead of the package directory when `EASYLLAMA_ROOT` is unset.
+- Warmup of bare Hugging Face repo snapshots (for example `glm5.3-flash`) no longer fails with `'functools.partial' object has no attribute 'get_lock'`: `HfProgress` now implements the full progress-bar contract `huggingface_hub` drives (class-level lock sharing with worker threads, file-progress bars, description setters, Xet transfer hooks), verified against the `huggingface_hub`/`tqdm` versions installed in the containers.
+- Warmup of models that reference their weights by hub-cache path (`--model .../hub/models--<owner>--<repo>/snapshots/<commit>/<file>`, for example `qwen3-embeddings` and `qwen3-reranker` in Qwen mode) no longer fails with `upstream command exited prematurely` on a fresh or wiped model cache: such references are now resolved and downloaded host-side, pinned to the exact snapshot commit the container expects, before the container loads the model.
+- GLM-5.3 Flash no longer dies at startup with `DistNetworkError: EADDRINUSE` on `server_port + 1` (503 on the first request, server-swap rolling back to the previous model): FreeToken binds its torch.distributed store at `server_port + 1`, but the port allocator gave consecutive model ports and lifecycle listeners out of the same band — for single-model profiles the lifecycle listener landed exactly on the store port, and co-resident models from another profile (for example Qwen's resident embeddings on 9001) held the same slot. The allocator now reserves a backend slot per model (two-port stride), places lifecycle listeners after the reserved band, and honors a per-profile `startPort` base (Qwen 9000, GLM-5.3 Flash 9100, llama.cpp 9200, TurboQuant 9300, SpiritBuun 9400, Lucebox 9500), so no two co-resident models share a port.
+
 ## [v0.6.3] - 2026-09-13
 
 Compact GPU reranking in Qwen mode, co-resident with GPU embeddings.

@@ -59,6 +59,8 @@ class DockerfileCompiler:
             ]
         elif image_type is IMAGE.VLLM:
             stages += ["builder-base", "vllm-builder"]
+        elif image_type is IMAGE.FREETOKEN:
+            stages += ["freetoken-builder"]
         stages.append(self.target(mode, image_type))
         return tuple(dict.fromkeys(stages))
 
@@ -98,7 +100,7 @@ class DockerBuilder:
         """Return a deterministic image tag for this role."""
         repository = self.settings.docker.image_name
         base_tag = self.settings.docker.image_tag
-        if self.image_type in {IMAGE.LLAMASWAP, IMAGE.LMCACHE} or (
+        if self.image_type in {IMAGE.LLAMASWAP, IMAGE.LMCACHE, IMAGE.FREETOKEN} or (
             self.mode is MODE.LLAMACPP and self.image_type is IMAGE.LLAMACPP
         ):
             return f"{repository}:{base_tag}-{self.image_type}"

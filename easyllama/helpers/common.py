@@ -13,14 +13,12 @@ LOGGER = APP_LOG.get(__name__)
 
 
 def project_root() -> Path:
-    """Perform the project root operation.
-
-    Returns:
-        Path: The project root result."""
+    """Return the easyllama data root: EASYLLAMA_ROOT, else the repository
+    root that contains this package (two levels above this module)."""
     env_root = os.environ.get("EASYLLAMA_ROOT")
     if env_root:
         return Path(env_root).resolve()
-    return Path(__file__).resolve().parents[1]
+    return Path(__file__).resolve().parents[2]
 
 
 def load_pyproject(root_dir: Path) -> tuple[dict[str, object], dict[str, object]]:

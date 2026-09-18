@@ -93,6 +93,8 @@ class ProxyConfigCompiler:
         """Select the required backend image for a configured model."""
         if self.mode is MODE.QWEN and "vllm" in command:
             return IMAGE.VLLM
+        if self.mode is MODE.GLM53FLASH:
+            return IMAGE.FREETOKEN
         return IMAGE.LLAMACPP
 
     @staticmethod
@@ -112,6 +114,26 @@ class ProxyConfigCompiler:
             command = expanded
         raise SystemExit("recursive llama-swap macros cannot be compiled")
 
+    def _start_port(self, payload: dict[str, Any], source: Path) -> int:
+        """Resolve the port base for this profile from its optional ``startPort`` key.
+
+        Args:
+            payload: The parsed config payload.
+            source: The source file, for diagnostics.
+
+        Returns:
+            int: The base port for this profile.
+
+        Raises:
+            SystemExit: If the startPort value cannot be parsed."""
+        raw = payload.pop("startPort", None)
+        if raw is None:
+            return self.start_port
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            raise SystemExit(f"invalid startPort {raw!r} in {source}") from None
+
     def compile(self, source: Path, api_key: str | None = None) -> OrchestrationPlan:
         """Compile one local process config into proxy and container contracts."""
         source_payload = yaml.safe_load(source.read_text()) or {}
@@ -119,6 +141,7 @@ class ProxyConfigCompiler:
         contracts: list[ContainerContract] = []
         macros = {**self.MACRO_DEFAULTS, **(payload.get("macros") or {})}
         models = payload.get("models", {})
+        base = self._start_port(payload, source)
         host_network = self.settings is not None and self.settings.docker.network_mode == "host"
         for index, (model_id, model) in enumerate(models.items()):
             command = self._expand(str(model["cmd"]).strip(), macros)
@@ -127,8 +150,13 @@ class ProxyConfigCompiler:
                 dict.fromkeys((*self.ENV_DEFAULTS, *self._environment(model.pop("env", []) or [])))
             )
             image = self.image_for_model(model_id, command)
-            port = self.start_port + index
-            lifecycle_port = self.start_port + len(models) + index
+            # Two ports per model: the API port, plus a reserved backend slot
+            # at port + 1 for multi-socket backends (FreeToken binds
+            # server_port + 1 for its torch.distributed store). Lifecycle
+            # listeners start after the reserved band so they never land on a
+            # backend slot or on another model's API port.
+            port = base + 2 * index
+            lifecycle_port = base + 2 * len(models) + index
             model_name = _NAME.sub("-", model_id.lower()).strip("-")
             name = f"easyllama-{self.mode}-{image}-{model_name}"
             command = _PORT.sub(str(port), command)

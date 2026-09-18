@@ -10,8 +10,14 @@ from pydantic.dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class HostCache:
-    """Base functionality shared by persistent host caches."""
+    """Base functionality shared by persistent host caches.
 
+    Attributes:
+        name: The name.
+        host: The host.
+        container: The container."""
+
+    name: str
     host: Path
     container: str
 

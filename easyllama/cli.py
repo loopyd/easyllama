@@ -222,6 +222,32 @@ def _status_handler(args: argparse.Namespace, extra_args: list[str]) -> int:
     return DockerRuntime(settings).status()
 
 
+def _wipe_caches(value: str | None, valid: set[str]) -> frozenset[str] | None:
+    """Parse the --wipe-cache list into the cache names clean should remove.
+
+    Args:
+        value: The value.
+        valid: The valid.
+
+    Returns:
+        frozenset[str] | None: The wipe result; None keeps every cache.
+
+    Raises:
+        SystemExit: If the parse operation cannot be completed."""
+    if value is None:
+        return None
+    if not value.strip():
+        return frozenset(valid)
+    names = {part.strip() for part in value.split(",") if part.strip()}
+    unknown = names - valid
+    if unknown:
+        raise SystemExit(
+            f"unknown cache name{'s' if len(unknown) > 1 else ''} {', '.join(sorted(unknown))}"
+            f"expected: {', '.join(sorted(valid))}"
+        )
+    return frozenset(names)
+
+
 def _clean_handler(args: argparse.Namespace, extra_args: list[str]) -> int:
     """Handle the clean command.
 
@@ -239,7 +265,9 @@ def _clean_handler(args: argparse.Namespace, extra_args: list[str]) -> int:
     settings = Config.load(
         config_file=args.config_file, mode_override=args.mode, host_override=args.host
     )
-    return DockerRuntime(settings).clean(all_images=args.all_images)
+    runtime = DockerRuntime(settings)
+    wipe = _wipe_caches(args.wipe_cache, {cache.name for cache in runtime.host_caches()})
+    return runtime.clean(all_images=args.all_images, wipe=wipe)
 
 
 def _lifecycle_handler(args: argparse.Namespace, extra_args: list[str]) -> int:
@@ -316,6 +344,17 @@ def _clean_config(parser: argparse.ArgumentParser) -> None:
     Args:
         parser: The parser."""
     parser.add_argument("--all-images", action="store_true")
+    parser.add_argument(
+        "--wipe-cache",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="CACHES",
+        help=(
+            "host caches to wipe as a comma-separated list (root, pkg, python, models); "
+            "omitted keeps all caches, empty wipes all"
+        ),
+    )
 
 
 def command_tree() -> tuple[CommandNode, ...]:
@@ -352,7 +391,7 @@ def command_tree() -> tuple[CommandNode, ...]:
         CommandNode(name="status", help="Show runtime container status", handler=_status_handler),
         CommandNode(
             name="clean",
-            help="Remove the runtime container, image, and all host cache contents",
+            help="Remove the runtime container and images; host caches only with --wipe-cache",
             handler=_clean_handler,
             configure_parser=_clean_config,
         ),

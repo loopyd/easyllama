@@ -128,6 +128,90 @@ def _trigger_warmup(
     return result
 
 
+HUB_CACHE_PREFIX = CONTAINERPATH.MODELS
+
+
+def _expand_macros(text: str, macros: dict[str, object]) -> str:
+    """Expand ${MACRO} references until the text is stable.
+
+    Args:
+        text: The text.
+        macros: The macros.
+
+    Returns:
+        str: The expanded text result."""
+    for _ in range(len(macros)):
+        expanded = re.sub(
+            r"\$\{([A-Za-z0-9_-]+)\}",
+            lambda item: str(macros.get(item.group(1), item.group(0))),
+            text,
+        )
+        if expanded == text:
+            break
+        text = expanded
+    return text
+
+
+def _model_file_refs(command: str) -> list[str]:
+    """Return every --model argument value from an expanded server command.
+
+    Args:
+        command: The command.
+
+    Returns:
+        list[str]: The model file refs result."""
+    return re.findall(r"(?:^|\s)--model\s+(\S+)", command)
+
+
+def _hub_cache_ref(path: str) -> tuple[str, str, str] | None:
+    """Decode a hub-cache file path into (repo, commit, file).
+
+    Args:
+        path: The path under the container Hugging Face hub cache.
+
+    Returns:
+        tuple[str, str, str] | None: The (repo, commit, file) result, or None
+        when the path does not use the models--<owner>--<repo>/snapshots layout."""
+    parts = Path(path.removeprefix(f"{HUB_CACHE_PREFIX}/")).parts
+    if len(parts) < 4 or parts[0].removeprefix("models--") == parts[0] or parts[1] != "snapshots":
+        return None
+    owner, _, repo = parts[0].removeprefix("models--").partition("--")
+    if not owner or not repo:
+        return None
+    return f"{owner}/{repo}", parts[2], "/".join(parts[3:])
+
+
+def _ensure_model_file(settings: Config, model_id: str, model_ref: str, label: str) -> None:
+    """Ensure a --model file exists in the host model cache, downloading if needed.
+
+    Hub-cache paths resolve to an authenticated host-side download pinned to the
+    snapshot commit the container command expects, so a wiped or fresh model
+    cache cannot fail the container upstream with a missing model file.
+
+    Args:
+        settings: The settings.
+        model_id: The model id.
+        model_ref: The model ref.
+        label: The label."""
+    if model_ref.startswith(f"{HUB_CACHE_PREFIX}/"):
+        ref = _hub_cache_ref(model_ref)
+        if ref is None:
+            LOGGER.warning("%s: cannot resolve hub cache path %s", label, model_ref)
+            return
+        repo, commit, file = ref
+        HuggingFace(model_id, repo).get(
+            file,
+            cache_dir=settings.dirs.models,
+            warmup=label,
+            revision=commit,
+        )
+        return
+    if model_ref.startswith("/") and not Path(model_ref).is_file():
+        LOGGER.warning(
+            "%s: model file %s is missing on the host; warmup may fail", label, model_ref
+        )
+
+
 def _prefetch_models(settings: Config, model_ids: list[str]) -> None:
     """Perform the internal prefetch models operation.
 
@@ -141,28 +225,27 @@ def _prefetch_models(settings: Config, model_ids: list[str]) -> None:
     models = config.get("models", {})
     total_models = len(model_ids)
     for position, model_id in enumerate(model_ids, start=1):
-        command = str(models.get(model_id, {}).get("cmd", ""))
-        match = re.search(r"(?:^|\s)-hf\s+(\S+)", command)
-        if not match:
-            continue
-        spec = match.group(1)
-        for _ in range(len(macros)):
-            expanded = re.sub(
-                r"\$\{([A-Za-z0-9_-]+)\}",
-                lambda item: str(macros.get(item.group(1), item.group(0))),
-                spec,
-            )
-            if expanded == spec:
-                break
-            spec = expanded
-        repo, selector = HuggingFace.parse_spec(spec)
-        if repo and selector:
-            hf = HuggingFace(model_id, repo)
-            hf.get(
-                hf.file(selector, suffixes=(".gguf",)),
-                cache_dir=settings.dirs.models,
-                warmup=f"Warming model {position}/{total_models}: {model_id}",
-            )
+        command = _expand_macros(str(models.get(model_id, {}).get("cmd", "")), macros)
+        label = f"Warming model {position}/{total_models}: {model_id}"
+        hf_match = re.search(r"(?:^|\s)-hf\s+(\S+)", command)
+        if hf_match:
+            repo, selector = HuggingFace.parse_spec(hf_match.group(1))
+            if repo:
+                hf = HuggingFace(model_id, repo)
+                if selector:
+                    hf.get(
+                        hf.file(selector, suffixes=(".gguf",)),
+                        cache_dir=settings.dirs.models,
+                        warmup=label,
+                    )
+                else:
+                    # Bare repo specs (for example GLM-5.3-Flash) resolve to a
+                    # filtered snapshot; prefetching here keeps the download
+                    # authenticated and off the container warmup deadline, in
+                    # the same host cache the mounted container reads from.
+                    hf.snapshot(cache_dir=settings.dirs.models, warmup=label)
+        for model_ref in _model_file_refs(command):
+            _ensure_model_file(settings, model_id, model_ref, label)
 
 
 def warmup_models(settings: Config, model_ids: list[str]) -> int:

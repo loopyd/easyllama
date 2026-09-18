@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Callable, Generator, Iterable, Iterator
+from contextlib import suppress
+import fnmatch
 from functools import partial
 import logging
 import os
 from pathlib import Path
+from threading import RLock
 import time
 from typing import Any
 import warnings
@@ -17,9 +20,16 @@ from .logger import LOG as APP_LOG
 LOG = APP_LOG.get(__name__)
 
 HF_URL_BASE = "https://huggingface.co"
+# Attach behavior: mirror an in-flight download owned by another process
+# (for example a container backend) instead of racing a second download.
+ATTACH_POLL_INTERVAL = 5.0
+ATTACH_QUIET_CYCLES = 12
+ATTACH_STALL_SECONDS = 120
 HF_EXTS = (
+    ".ftw",
     ".gguf",
     ".json",
+    ".jinja",
     ".model",
     ".safetensors",
     ".safetensors.index.json",
@@ -27,8 +37,10 @@ HF_EXTS = (
     ".txt",
 )
 SNAP_PATTERNS = (
+    "*.ftw",
     "*.gguf",
     "*.json",
+    "*.jinja",
     "*.model",
     "*.safetensors",
     "*.safetensors.index.json",
@@ -50,6 +62,10 @@ SNAP_PATTERNS = (
 class HfProgress:
     """Report rate-limited Hugging Face download progress.
 
+    Implements the progress-bar contract huggingface_hub drives across versions:
+    context manager, update/close, description setters, Xet transfer hooks, and
+    the class-level lock that snapshot_download shares with its worker threads.
+
     Attributes:
         total: The total.
         n: The n.
@@ -58,6 +74,26 @@ class HfProgress:
     _last_log: The last log.
     _last_n: The last n."""
 
+    _lock: RLock | None = None
+
+    @classmethod
+    def get_lock(cls: type[HfProgress]) -> RLock:
+        """Return the class-level lock, creating it on first use.
+
+        Returns:
+            RLock: The lock result."""
+        if cls._lock is None:
+            cls._lock = RLock()
+        return cls._lock
+
+    @classmethod
+    def set_lock(cls: type[HfProgress], lock: RLock) -> None:
+        """Share a lock with worker threads (tqdm lock API).
+
+        Args:
+            lock: The lock."""
+        cls._lock = lock
+
     def __init__(self, *args: Any, warmup: str | None = None, **kwargs: Any) -> None:
         """Initialize the instance.
 
@@ -65,10 +101,13 @@ class HfProgress:
             warmup: The warmup.
             *args: Additional positional arguments.
             **kwargs: Additional keyword arguments."""
+        self._iterable: Iterable[Any] | None = args[0] if args else None
         self.total = int(kwargs.get("total") or 0)
         self.n = int(kwargs.get("initial") or 0)
         self.desc = str(kwargs.get("desc") or "Downloading model")
         self.warmup = warmup
+        self._is_bytes = "unit" in kwargs
+        self._rate: float | None = None
         self._last_log = time.monotonic()
         self._last_n = self.n
 
@@ -79,6 +118,26 @@ class HfProgress:
         Returns:
             str: The label result."""
         return f"{self.warmup} — {self.desc}" if self.warmup else self.desc
+
+    @property
+    def format_dict(self) -> dict[str, object]:
+        """Expose the smoothed rate huggingface_hub aggregate reporting reads.
+
+        Returns:
+            dict[str, object]: The format dict result."""
+        return {"rate": self._rate}
+
+    def __iter__(self) -> Iterator[Any]:
+        """Iterate a wrapped file list (tqdm concurrent-map compatibility).
+
+        Returns:
+            Iterator[Any]: The iter result.
+
+        Raises:
+            TypeError: If no iterable was provided."""
+        if self._iterable is None:
+            raise TypeError("HfProgress only iterates when constructed with an iterable")
+        return iter(self._iterable)
 
     def __enter__(self) -> HfProgress:
         """Enter the context manager.
@@ -94,36 +153,74 @@ class HfProgress:
             *_: Additional positional arguments."""
         self.close()
 
-    def update(self, n: int = 1) -> None:
+    def update(self, n: int | float = 1) -> None:
         """Perform the update operation.
 
         Args:
             n: The n."""
-        self.n += n
+        self.n = max(0, self.n + int(n or 0))
         now = time.monotonic()
         elapsed = now - self._last_log
         transferred = self.n - self._last_n
         if elapsed < 5 or transferred <= 0:
             return
         rate = transferred / elapsed
-        if self.total:
+        self._rate = rate
+        if self._is_bytes:
+            if self.total:
+                LOG.info(
+                    "%s: %s/%s (%.1f%%, %s/s, ETA %s)",
+                    self.label,
+                    format_bytes(self.n),
+                    format_bytes(self.total),
+                    self.n * 100 / self.total,
+                    format_bytes(rate),
+                    format_duration((self.total - self.n) / rate),
+                )
+            else:
+                LOG.info(
+                    "%s: %s (%s/s, ETA unknown)",
+                    self.label,
+                    format_bytes(self.n),
+                    format_bytes(rate),
+                )
+        elif self.total:
             LOG.info(
-                "%s: %s/%s (%.1f%%, %s/s, ETA %s)",
+                "%s: %d/%d (%.1f%%)",
                 self.label,
-                format_bytes(self.n),
-                format_bytes(self.total),
+                self.n,
+                self.total,
                 self.n * 100 / self.total,
-                format_bytes(rate),
-                format_duration((self.total - self.n) / rate),
             )
         else:
-            LOG.info(
-                "%s: %s (%s/s, ETA unknown)",
-                self.label,
-                format_bytes(self.n),
-                format_bytes(rate),
-            )
+            LOG.info("%s: %d", self.label, self.n)
         self._last_log, self._last_n = now, self.n
+
+    def set_description(self, desc: str | None = None, refresh: bool = True) -> None:
+        """Accept tqdm-compatible description updates.
+
+        Args:
+            desc: The desc.
+            refresh: The refresh."""
+        if desc is not None:
+            self.desc = str(desc)
+        if refresh:
+            self.refresh()
+
+    def set_description_str(self, desc: str | None = None, refresh: bool = True) -> None:
+        """Accept tqdm raw-string description updates.
+
+        Args:
+            desc: The desc.
+            refresh: The refresh."""
+        self.set_description(desc, refresh=refresh)
+
+    def update_transfer(self, n: int | float = 1) -> None:
+        """Accept Xet network-transfer bytes without double-counting disk bytes.
+
+        Args:
+            n: The n."""
+        del n
 
     def set_postfix_str(self, *_: object, **__: object) -> None:
         """Accept optional Hugging Face Xet transfer details."""
@@ -153,11 +250,18 @@ class HuggingFace:
 
     @property
     def token(self) -> str | None:
-        """Perform the token operation.
+        """Resolve the Hugging Face token: host env, then configured credentials.
 
         Returns:
             str | None: The token result."""
-        return os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+        if env_token := os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN"):
+            return env_token
+        from ..config import Config
+
+        try:
+            return Config.load().load_auth().hf_token
+        except (OSError, SystemExit, ValueError):
+            return None
 
     @staticmethod
     def mmproj_url(spec: str) -> str:
@@ -335,6 +439,7 @@ class HuggingFace:
         *,
         cache_dir: Path | None = None,
         warmup: str | None = None,
+        revision: str | None = None,
     ) -> Path:
         """Download or return a cached repository file.
 
@@ -342,6 +447,7 @@ class HuggingFace:
             file: The file.
             cache_dir: The cache dir.
             warmup: The warmup.
+            revision: The revision.
 
         Returns:
             Path: The get result.
@@ -352,29 +458,53 @@ class HuggingFace:
         from huggingface_hub.errors import LocalEntryNotFoundError
 
         repo = self._repo()
+        options: dict[str, Any] = {
+            "repo_id": repo,
+            "filename": file,
+            "token": self.token,
+            "cache_dir": cache_dir,
+            "tqdm_class": partial(HfProgress, warmup=warmup),
+        }
+        if revision is not None:
+            options["revision"] = revision
+
+        def local_only() -> Path:
+            return Path(hf_hub_download(**options, local_files_only=True))
+
         try:
-            options: dict[str, Any] = {
-                "repo_id": repo,
-                "filename": file,
-                "token": self.token,
-                "cache_dir": cache_dir,
-                "tqdm_class": partial(HfProgress, warmup=warmup),
-            }
             try:
-                path = hf_hub_download(**options, local_files_only=True)
+                cached = local_only()
+                LOG.info("using cached %s file %s", self.name, file)
+                return cached
             except LocalEntryNotFoundError:
-                quiet = self.quiet()
-                next(quiet)
-                try:
-                    path = hf_hub_download(**options)
-                finally:
-                    quiet.close()
+                pass
+            attached = self._attach_if_in_flight(
+                file, cache_dir=cache_dir, warmup=warmup, local_only=local_only
+            )
+            if attached is not None:
+                LOG.info("using cached %s file %s", self.name, file)
+                return attached
+            LOG.info("downloading %s file %s", self.name, file)
+            quiet = self.quiet()
+            next(quiet)
+            try:
+                return Path(hf_hub_download(**options))
+            finally:
+                quiet.close()
         except Exception as exc:  # pragma: no cover
             raise SystemExit(f"failed to download {self.name} from {repo}/{file}: {exc}") from exc
-        return Path(path)
 
-    def snapshot(self) -> Path:
+    def snapshot(
+        self,
+        *,
+        cache_dir: Path | None = None,
+        warmup: str | None = None,
+    ) -> Path:
         """Download a filtered repository snapshot.
+
+        Args:
+            cache_dir: The cache dir.
+            warmup: The warmup.
 
         Returns:
             Path: The snapshot result.
@@ -382,17 +512,317 @@ class HuggingFace:
         Raises:
             SystemExit: If the snapshot operation cannot be completed."""
         from huggingface_hub import snapshot_download
+        from huggingface_hub.errors import LocalEntryNotFoundError
 
         repo = self._repo()
+        options: dict[str, Any] = {
+            "repo_id": repo,
+            "allow_patterns": list(SNAP_PATTERNS),
+            "token": self.token,
+            "cache_dir": cache_dir,
+            "tqdm_class": partial(HfProgress, warmup=warmup),
+        }
+
+        def local_only() -> Path:
+            return Path(snapshot_download(**options, local_files_only=True))
+
+        def local_weights() -> Path | None:
+            try:
+                local = local_only()
+            except LocalEntryNotFoundError:
+                return None
+            return local if self._snapshot_has_weights(local) else None
+
         try:
-            path = snapshot_download(
-                repo_id=repo,
-                allow_patterns=list(SNAP_PATTERNS),
-                token=self.token,
+            cached = local_weights()
+            if cached is not None:
+                LOG.info("using cached snapshot for %s (%s)", self.name, cached)
+                return cached
+            attached = self._attach_if_in_flight_snapshot(
+                cache_dir=cache_dir, warmup=warmup, local_weights=local_weights
             )
+            if attached is not None:
+                return attached
+            path = snapshot_download(**options)
+            LOG.info("downloaded snapshot for %s (%s)", self.name, path)
+            return Path(path)
         except Exception as exc:  # pragma: no cover
             raise SystemExit(f"failed to download {self.name} snapshot from {repo}: {exc}") from exc
-        return Path(path)
+
+    @staticmethod
+    def _snapshot_has_weights(snapshot: Path) -> bool:
+        """Return whether a local snapshot already holds model weights.
+
+        Args:
+            snapshot: The snapshot.
+
+        Returns:
+            bool: The snapshot has weights result."""
+        return bool(
+            tuple(snapshot.glob("*.gguf"))
+            or tuple(snapshot.glob("*.safetensors"))
+            or tuple(snapshot.glob("*.model"))
+            or tuple(snapshot.glob("*.ftw"))
+        )
+
+    @staticmethod
+    def _hub_cache_dir(cache_dir: Path | None) -> Path | None:
+        """Resolve the concrete hub cache directory Hugging Face would use."""
+        if cache_dir is not None:
+            return cache_dir
+        if env_cache := os.environ.get("HF_HUB_CACHE"):
+            return Path(env_cache)
+        hf_home = os.environ.get("HF_HOME")
+        root = Path(hf_home) if hf_home else Path.home() / ".cache" / "huggingface"
+        return root / "hub"
+
+    @staticmethod
+    def _repo_folder(repo: str) -> str:
+        """Return the huggingface_hub cache folder name for a repository."""
+        from huggingface_hub.file_download import repo_folder_name
+
+        return repo_folder_name(repo_id=repo, repo_type="model")
+
+    @classmethod
+    def _download_lock_path(cls, hub: Path, repo: str, etag: str) -> Path:
+        """Return the huggingface_hub download lock path for one file blob."""
+        return hub / ".locks" / cls._repo_folder(repo) / f"{etag}.lock"
+
+    @staticmethod
+    def _lock_held(lock_path: Path) -> bool:
+        """Probe non-blockingly whether another process holds a download lock.
+
+        Mirrors huggingface_hub's WeakFileLock class selection (flock with a
+        SoftFileLock fallback) so the probe agrees with the downloader."""
+        from filelock import FileLock, SoftFileLock, Timeout
+
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        probe = FileLock(str(lock_path), timeout=0, mode=0o664)
+        try:
+            probe.acquire()
+        except NotImplementedError:
+            # Filesystem without flock support: mirror WeakFileLock's fallback.
+            probe = SoftFileLock(str(lock_path), timeout=0)
+            try:
+                probe.acquire()
+            except (NotImplementedError, Timeout, RuntimeError):
+                return True
+        except (Timeout, RuntimeError):
+            return True
+        else:
+            with suppress(OSError):
+                probe.release()
+        return False
+
+    @classmethod
+    def _incomplete_blobs(cls, hub: Path) -> list[Path]:
+        """List in-flight partial blobs in the hub cache.
+
+        Covers both the hub-shared layout (blobs/, optionally fan-out) and the
+        per-repo layout (models--<repo>/blobs/) used by huggingface_hub."""
+        partials: list[Path] = []
+        shared = hub / "blobs"
+        if shared.is_dir():
+            partials.extend(shared.rglob("*.incomplete"))
+        for repo_blobs in sorted(hub.glob("models--*/blobs")):
+            partials.extend(repo_blobs.glob("*.incomplete"))
+        return sorted(set(partials), key=str)
+
+    def _file_metadata(self, file: str) -> tuple[str, int] | None:
+        """Return (etag, size) for one repository file, or None when unavailable."""
+        from huggingface_hub import hf_hub_url
+        from huggingface_hub.file_download import get_hf_file_metadata
+
+        try:
+            meta = get_hf_file_metadata(hf_hub_url(self._repo(), file), token=self.token)
+        except Exception as exc:
+            LOG.debug("could not fetch metadata for %s/%s: %s", self.repo, file, exc)
+            return None
+        if not meta.etag:
+            return None
+        return meta.etag, int(meta.size or 0)
+
+    def _snapshot_file_metadata(self) -> list[tuple[str, int]] | None:
+        """Return (etag, size) for every snapshot-eligible file, or None."""
+        from huggingface_hub import HfApi
+
+        try:
+            entries = HfApi(token=self.token).list_repo_tree(repo_id=self._repo(), recursive=True)
+        except Exception as exc:
+            LOG.debug("could not list %s files: %s", self.repo, exc)
+            return None
+        files: list[tuple[str, int]] = []
+        for entry in entries:
+            if getattr(entry, "size", None) is None:
+                continue
+            if not any(
+                fnmatch.fnmatch(Path(entry.path).name, pattern) for pattern in SNAP_PATTERNS
+            ):
+                continue
+            etag = entry.lfs.sha256 if entry.lfs else entry.blob_id
+            if etag:
+                files.append((etag, int(entry.size)))
+        return files or None
+
+    def _attach_if_in_flight(
+        self,
+        file: str,
+        *,
+        cache_dir: Path | None,
+        warmup: str | None,
+        local_only: Callable[[], Path],
+    ) -> Path | None:
+        """Mirror a concurrent single-file download until it completes, if one is running.
+
+        Returns None when nothing external is downloading this file (or when
+        the metadata cannot be resolved), so the caller falls back to its own
+        resumable download."""
+        hub = self._hub_cache_dir(cache_dir)
+        if hub is None or not self._incomplete_blobs(hub):
+            return None
+        meta = self._file_metadata(file)
+        if meta is None:
+            return None
+        etag, size = meta
+        lock_path = self._download_lock_path(hub, self._repo(), etag)
+        if not self._lock_held(lock_path):
+            return None
+
+        def mirror() -> int:
+            repo_blobs = hub / self._repo_folder(self._repo()) / "blobs"
+            candidates = (
+                repo_blobs / f"{etag}.incomplete",
+                hub / "blobs" / f"{etag}.incomplete",
+                hub / "blobs" / etag[:2] / f"{etag}.incomplete",
+            )
+            return max((c.stat().st_size for c in candidates if c.is_file()), default=0)
+
+        def on_complete() -> Path | None:
+            from huggingface_hub.errors import LocalEntryNotFoundError
+
+            try:
+                return local_only()
+            except LocalEntryNotFoundError:
+                return None
+
+        return self._attach_to_external_download(
+            hub=hub,
+            desc=file,
+            total=size,
+            initial=mirror(),
+            lock_held=partial(self._lock_held, lock_path),
+            mirror=mirror,
+            on_complete=on_complete,
+            warmup=warmup,
+        )
+
+    def _attach_if_in_flight_snapshot(
+        self,
+        *,
+        cache_dir: Path | None,
+        warmup: str | None,
+        local_weights: Callable[[], Path | None],
+    ) -> Path | None:
+        """Mirror a concurrent snapshot download until it completes, if one is running."""
+        hub = self._hub_cache_dir(cache_dir)
+        if hub is None or not self._incomplete_blobs(hub):
+            return None
+        files = self._snapshot_file_metadata()
+        if not files:
+            return None
+        etags = {etag for etag, _ in files}
+        total = sum(size for _, size in files)
+        repo = self._repo()
+
+        def our_partials() -> list[Path]:
+            return [
+                path
+                for path in self._incomplete_blobs(hub)
+                if path.name.removesuffix(".incomplete") in etags
+            ]
+
+        def lock_held() -> bool:
+            return any(
+                self._lock_held(self._download_lock_path(hub, repo, etag)) for etag in sorted(etags)
+            )
+
+        def mirror() -> int:
+            return sum(p.stat().st_size for p in our_partials() if p.is_file())
+
+        if not (lock_held() or mirror() > 0):
+            return None
+
+        def on_complete() -> Path | None:
+            return local_weights()
+
+        return self._attach_to_external_download(
+            hub=hub,
+            desc=f"{self.name} snapshot ({len(files)} files)",
+            total=total,
+            initial=mirror(),
+            lock_held=lock_held,
+            mirror=mirror,
+            on_complete=on_complete,
+            warmup=warmup,
+        )
+
+    def _attach_to_external_download(
+        self,
+        *,
+        hub: Path,
+        desc: str,
+        total: int,
+        initial: int,
+        lock_held: Callable[[], bool],
+        mirror: Callable[[], int],
+        on_complete: Callable[[], Path | None],
+        warmup: str | None,
+    ) -> Path | None:
+        """Mirror progress of a download owned by another process until it settles.
+
+        Returns the resolved local path once the external download verifiably
+        completed, or None when it is no longer in flight so the caller can
+        download itself (resuming any partial bytes).
+        """
+        LOG.info(
+            "attaching to in-flight download of %s owned by another process; mirroring progress",
+            desc,
+        )
+        reporter = HfProgress(total=total, initial=initial, desc=desc, warmup=warmup, unit="B")
+        last_size = initial
+        last_growth = time.monotonic()
+        quiet_cycles = 0
+        stall_warned = False
+        while True:
+            size = mirror()
+            delta = max(0, size - last_size)
+            active = lock_held() or delta > 0
+            if delta:
+                reporter.update(delta)
+                last_size = size
+                last_growth = time.monotonic()
+                stall_warned = False
+            elif (
+                active
+                and not stall_warned
+                and time.monotonic() - last_growth >= ATTACH_STALL_SECONDS
+            ):
+                LOG.warning(
+                    "%s: in-flight download shows no progress for %ss; still waiting",
+                    reporter.label,
+                    ATTACH_STALL_SECONDS,
+                )
+                stall_warned = True
+            if not active:
+                result = on_complete()
+                if result is not None:
+                    return result
+                quiet_cycles += 1
+                if quiet_cycles >= ATTACH_QUIET_CYCLES:
+                    return None
+            else:
+                quiet_cycles = 0
+            time.sleep(ATTACH_POLL_INTERVAL)
 
     def pick(
         self,

@@ -106,7 +106,11 @@ for _mode in MODE:
                     ImageDependency(IMAGE.LLAMACPP, gpu=True),
                 )
                 if _mode is MODE.QWEN
-                else (ImageDependency(IMAGE.LLAMACPP, gpu=True),)
+                else (
+                    (ImageDependency(IMAGE.FREETOKEN, gpu=True),)
+                    if _mode is MODE.GLM53FLASH
+                    else (ImageDependency(IMAGE.LLAMACPP, gpu=True),)
+                )
             ),
         ),
     )

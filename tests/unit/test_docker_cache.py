@@ -3,6 +3,7 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from typing import Any, cast
 
+from easyllama.cli import _wipe_caches
 from easyllama.config import (
     CONTAINERPATH,
     CPU_WEIGHT,
@@ -15,6 +16,7 @@ from easyllama.config import (
     HardwareProfile,
     ProfilesConfig,
 )
+from easyllama.helpers.builder import DockerBuilder
 from easyllama.helpers.cache import (
     HostCache,
     ModelCache,
@@ -83,7 +85,7 @@ def test_performance_floors_are_validated() -> None:
 
 def test_host_cache_lifecycle() -> None:
     with TemporaryDirectory() as temporary_dir:
-        cache = HostCache(Path(temporary_dir) / "cache", "/cache")
+        cache = HostCache("cache", Path(temporary_dir) / "cache", "/cache")
         assert not cache.exists()
         cache.ensure()
         (cache.host / "nested").mkdir()
@@ -114,6 +116,7 @@ def test_host_cache_configuration() -> None:
         PythonCache,
         ModelCache,
     )
+    assert tuple(cache.name for cache in caches) == ("root", "pkg", "python", "models")
     assert tuple(cache.container for cache in caches) == (
         CONTAINERPATH.ROOT_CACHE,
         CONTAINERPATH.PKG_CACHE,
@@ -124,6 +127,62 @@ def test_host_cache_configuration() -> None:
     for cache in caches:
         assert (cache.host / ".gitkeep").is_file()
         assert f"!{cache.host.relative_to(root)}/.gitkeep" in ignored
+
+
+def _clean_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> DockerRuntime:
+    """Build a DockerRuntime whose clean side effects are recorded, not executed."""
+    settings = SimpleNamespace(
+        dirs=SimpleNamespace(
+            root_cache=tmp_path / "root",
+            pkg_cache=tmp_path / "pkg",
+            python_cache=tmp_path / "python",
+            models=tmp_path / "models",
+        )
+    )
+    runtime = object.__new__(DockerRuntime)
+    runtime.settings = cast(Any, settings)
+    runtime.client = None
+    monkeypatch.setattr(DockerRuntime, "ensure_daemon", lambda self: None)
+    monkeypatch.setattr(DockerRuntime, "remove_container", lambda self: None)
+    monkeypatch.setattr(DockerRuntime, "remove_networks", lambda self: None)
+    monkeypatch.setattr(DockerRuntime, "_remove_effective_configs", lambda self: None)
+    monkeypatch.setattr(DockerRuntime, "builders", lambda self: [])
+    monkeypatch.setattr(DockerBuilder, "managed_images", classmethod(lambda cls, _client: []))
+    return runtime
+
+
+def test_clean_keeps_caches_without_wipe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """clean without --wipe-cache must leave every host cache in place."""
+    cleaned: list[str] = []
+    monkeypatch.setattr(HostCache, "clean", lambda self: cleaned.append(self.name))
+    runtime = _clean_runtime(tmp_path, monkeypatch)
+
+    assert runtime.clean() == 0
+    assert cleaned == []
+
+
+def test_clean_wipes_selected_caches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """--wipe-cache removes only the listed caches, empty wipes all."""
+    cleaned: list[str] = []
+    monkeypatch.setattr(HostCache, "clean", lambda self: cleaned.append(self.name))
+    runtime = _clean_runtime(tmp_path, monkeypatch)
+
+    assert runtime.clean(wipe=frozenset({"models"})) == 0
+    assert cleaned == ["models"]
+
+    cleaned.clear()
+    assert runtime.clean(wipe=frozenset({"root", "pkg", "python", "models"})) == 0
+    assert cleaned == ["root", "pkg", "python", "models"]
+
+
+def test_wipe_cache_parsing() -> None:
+    valid = {"root", "pkg", "python", "models"}
+    assert _wipe_caches(None, valid) is None
+    assert _wipe_caches("", valid) == frozenset(valid)
+    assert _wipe_caches("models", valid) == frozenset({"models"})
+    assert _wipe_caches("root, pkg", valid) == frozenset({"root", "pkg"})
+    with pytest.raises(SystemExit, match="unknown cache name bogus"):
+        _wipe_caches("bogus", valid)
 
 
 def test_qwen_lmcache_configuration() -> None:

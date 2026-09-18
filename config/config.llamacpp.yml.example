@@ -1,3 +1,4 @@
+startPort: 9200
 macros:
   qwen3_chat_target_hf: unsloth/Qwen3.6-27B-GGUF:Q4_K_M
   pi_emb_hf_model: Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M

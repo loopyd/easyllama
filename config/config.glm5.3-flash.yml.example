@@ -1,0 +1,30 @@
+startPort: 9100
+globalTTL: 1800
+routing:
+  router:
+    use: group
+    settings:
+      groups:
+        gpu:
+          swap: true
+          exclusive: true
+          members:
+          - glm53-chat
+macros:
+  glm53_flash_hf: oakmindai/GLM-5.3-Flash-NVFP4-FTW
+models:
+  glm53-chat:
+    concurrencyLimit: 0
+    name: GLM-5.3 Flash 320B MoE NVFP4
+    description: 320B total / 18B active MoE chat via the FreeToken runtime; pre-packed FTW expert banks for fast load, NVFP4 experts offloaded to host RAM with NVMe fallback; KV pool auto-sized from free VRAM (up to 262,144-token context)
+    cmd: '${server_bin}
+      server
+      glm5.3-flash
+      --bin /opt/ft-venv/bin/ft
+      -hf ${glm53_flash_hf}
+      --host 0.0.0.0
+      --port ${PORT}
+      --max-seq-len-override 262144
+      --kv-reserve-tokens 65536
+      '
+    cmdStop: /bin/kill -TERM ${PID}

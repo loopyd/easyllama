@@ -73,6 +73,11 @@
         "cpu": "medium",
         "ram": "medium",
         "swap": "medium"
+      },
+      "freetoken": {
+        "cpu": "xhigh",
+        "ram": "xhigh",
+        "swap": "medium"
       }
     }
   },
@@ -130,6 +135,16 @@
         "url": "https://github.com/Luce-Org/lucebox-hub.git",
         "ref": "main"
       }
+    },
+    "glm5.3-flash": {
+      "repo": {
+        "url": "https://github.com/FlashML-org/FreeToken.git",
+        "ref": "main"
+      },
+      "services": [
+        "llamaswap",
+        "freetoken"
+      ]
     }
   },
   "locale": {

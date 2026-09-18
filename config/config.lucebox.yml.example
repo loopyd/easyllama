@@ -1,3 +1,4 @@
+startPort: 9500
 macros:
   pi_emb_hf_model: Qwen/Qwen3-Embedding-8B-GGUF:Q5_K_M
   dflash_pflash_profile: ''

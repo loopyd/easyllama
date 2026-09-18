@@ -110,6 +110,18 @@ class Model:
             return None
         return Model(self.name, source, outtype=self.outtype).gguf(repo=repo)
 
+    def snapshot(self) -> Path:
+        """Return the downloaded Hugging Face snapshot directory.
+
+        Returns:
+            Path: The snapshot directory result.
+
+        Raises:
+            SystemExit: If no Hugging Face repository is configured."""
+        if self.hf is None:
+            raise SystemExit(f"{self.name} Hugging Face repo is required")
+        return self.hf.snapshot()
+
     def pick(
         self,
         *,

@@ -303,8 +303,9 @@ class DockerRuntime:
         }
         for builder in builders:
             build_args = common_build_args.copy()
-            if builder.image_type is IMAGE.LLAMACPP:
-                build_args["CMAKE_CUDA_ARCHITECTURES"] = cuda_architectures(self.settings)
+            if builder.image_type in {IMAGE.LLAMACPP, IMAGE.FREETOKEN}:
+                if builder.image_type is IMAGE.LLAMACPP:
+                    build_args["CMAKE_CUDA_ARCHITECTURES"] = cuda_architectures(self.settings)
                 build_args.update(mode_metadata.build_args(self.settings))
                 summary = mode_metadata.build_summary(
                     self.settings,
@@ -363,7 +364,14 @@ class DockerRuntime:
             LOGGER.warning("container %s does not exist", self.settings.docker.container_name)
 
     def _container_environment(self, auth, contract: ContainerContract) -> dict[str, str]:
-        """Return environment values for one dependency container."""
+        """Return environment values for one dependency container.
+
+        Contract ``${ENV}`` placeholders expand against the host environment. A
+        placeholder that cannot be resolved on the host must not leak the literal
+        ``${ENV}`` into the container: a value already resolved here (for example
+        the configured HF_TOKEN) is kept instead, and a fully resolved expansion
+        takes precedence over it (host environment > configured credential).
+        """
         environment = {
             "EASYLLAMA_RUNTIME_MODE": RUNTIME.CONTAINER,
             "EASYLLAMA_MODE": self.settings.runtime.mode,
@@ -372,12 +380,22 @@ class DockerRuntime:
             "LC_ALL": self.settings.locale.lc_all,
             "EASYLLAMA_ROOT": "/app",
             "EASYLLAMA_MMPROJ_ARG": self.settings.mmproj_arg(auth),
+            # Pin every in-container Hugging Face client (easyllama helper, vLLM,
+            # FreeToken, transformers) to the mounted host cache so model downloads
+            # persist across image rebuilds and container restarts instead of
+            # re-downloading into an ephemeral image layer.
+            "HF_HOME": str(Path(CONTAINERPATH.MODELS).parent),
+            "HF_HUB_CACHE": str(CONTAINERPATH.MODELS),
         }
         if auth.hf_token:
             environment["HF_TOKEN"] = auth.hf_token
         for item in contract.environment:
             key, _, value = item.partition("=")
-            environment[key] = os.path.expandvars(value)
+            resolved = os.path.expandvars(value)
+            if "${" in resolved:
+                continue
+            if resolved or key not in environment:
+                environment[key] = resolved
         return environment
 
     def _run_dependency(
@@ -518,7 +536,10 @@ class DockerRuntime:
                 running_mode,
             )
             return 0
-        if container is not None:
+        # Sweep stale containers from earlier runs (stopped orchestrator or
+        # dependency containers left behind by a crash) so start stays
+        # idempotent instead of failing with a container-name conflict.
+        if container is not None or self.mode_containers():
             self.remove_container()
 
         source_config = self.settings.resolve_ls_config()
@@ -579,19 +600,20 @@ class DockerRuntime:
             CONTAINER_PORT=str(self.settings.runtime.container_port),
             EASYLLAMA_MMPROJ_ARG=mmproj_argument,
         )
-        connection = (
-            {"network_mode": "host"}
-            if host_network
-            else {
+        if host_network:
+            connection: dict[str, object] = {"network_mode": "host"}
+        elif network is None:
+            raise SystemExit(f"network {self.network_name} is required for container networking")
+        else:
+            connection = {
                 "network": network.name,
                 "ports": {
                     f"{self.settings.runtime.container_port}/tcp": (
                         str(self.settings.runtime.host),
                         self.settings.runtime.host_port,
-                    )
+                    ),
                 },
             }
-        )
         process = {"command": ["serve"]}
         if host_network:
             process = {
@@ -740,17 +762,18 @@ class DockerRuntime:
     def host_caches(self) -> tuple[HostCache, ...]:
         """Return persistent host caches in mount order."""
         return (
-            RootCache(self.settings.dirs.root_cache, CONTAINERPATH.ROOT_CACHE),
-            PackageCache(self.settings.dirs.pkg_cache, CONTAINERPATH.PKG_CACHE),
-            PythonCache(self.settings.dirs.python_cache, CONTAINERPATH.PYTHON_CACHE),
-            ModelCache(self.settings.dirs.models, CONTAINERPATH.MODELS),
+            RootCache("root", self.settings.dirs.root_cache, CONTAINERPATH.ROOT_CACHE),
+            PackageCache("pkg", self.settings.dirs.pkg_cache, CONTAINERPATH.PKG_CACHE),
+            PythonCache("python", self.settings.dirs.python_cache, CONTAINERPATH.PYTHON_CACHE),
+            ModelCache("models", self.settings.dirs.models, CONTAINERPATH.MODELS),
         )
 
-    def clean(self, *, all_images: bool = False) -> int:
+    def clean(self, *, all_images: bool = False, wipe: frozenset[str] | None = None) -> int:
         """Remove runtime containers, generated configuration, images, and host caches.
 
         Args:
             all_images: The all images.
+            wipe: The wipe.
 
         Returns:
             int: The clean result."""
@@ -758,9 +781,15 @@ class DockerRuntime:
         self.remove_container()
         self.remove_networks()
         self._remove_effective_configs()
+        kept: list[str] = []
         for cache in self.host_caches():
-            cache.clean()
-            LOGGER.info("cleaned host cache %s", cache.host)
+            if wipe is not None and cache.name in wipe:
+                cache.clean()
+                LOGGER.info("cleaned host cache %s (%s)", cache.name, cache.host)
+            else:
+                kept.append(cache.name)
+        if kept:
+            LOGGER.info("kept host caches: %s (clean --wipe-cache to remove them)", ", ".join(kept))
         image_names = [
             image.tags[0] for image in DockerBuilder.managed_images(self.client) if image.tags
         ]
