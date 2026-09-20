@@ -72,6 +72,14 @@ class ProxyConfigCompiler:
         "logLevel": "info",
         "sendLoadingState": False,
         "globalTTL": 0,
+        # Fallback routing for profiles that declare no ``routing`` block
+        # (llamacpp, turboquant, spiritbuun, lucebox - all of which really do
+        # name their models ``qwen3-chat``/``qwen3-embeddings``). The merge in
+        # ``compile`` is shallow, so a profile that declares its own ``routing``
+        # (qwen, glm5.3-flash) replaces this block entirely. This is not
+        # co-residency residue: it predates that work and must keep a
+        # ``groups.gpu.members`` list because ``compile`` reads that path
+        # unconditionally.
         "routing": {
             "router": {
                 "use": "group",

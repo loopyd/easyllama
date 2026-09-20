@@ -77,7 +77,7 @@ The `glm5.3-flash` column is omitted from the matrix on purpose: it is served by
 Important:
 
 - `POST /v1/messages` is specific to `lucebox` in the llama.cpp family; Spiritbuun launches its upstream llama-server without a project-owned messages adapter. The `glm5.3-flash` (FreeToken) mode also serves `POST /v1/messages` natively.
-- The `qwen` profile keeps GPU embeddings and the BGE reranker together in a non-swapping search group. Chat and search groups are mutually exclusive. Search models have `ttl: 0`; chat uses the 30-minute global idle timer.
+- The `qwen` profile keeps GPU embeddings and the BGE reranker together in a non-swapping search group. Chat and search groups are mutually exclusive, so the auxiliary models unload when a large chat request needs the GPU. Both search models inherit the 30-minute `globalTTL`: per-model `ttl: 0` overrides were removed because they stopped llama-swap from ever swapping the auxiliary models in. The proxy owns their start, health-check and evict lifecycle.
 - Qwen thinking is controlled by `/chat_template/qwen3.8.jinja` through `reasoning_effort`: native values are `low`, `medium`, and `xhigh`; clients with additional level names must map them to those values.
 - Only Qwen mode ships a reranker. Its `qwen3-reranker` identifier denotes the Qwen-mode endpoint, not a Qwen-family model: the weights are BGE reranker v2 M3 Q8_0. Send `model`, `query`, `documents` and optional `top_n`; results include document indices and relevance scores. Use the authenticated proxy rather than private native/lifecycle ports.
 
