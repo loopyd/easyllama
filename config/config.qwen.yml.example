@@ -47,10 +47,10 @@ models:
       --default-chat-template-kwargs ''{"preserve_thinking": true}''
       --language-model-only
       --max-model-len 131072
-      --max-num-seqs 16
-      --max-num-batched-tokens 8192
+      --max-num-seqs 4
+      --max-num-batched-tokens 2048
       --kv-cache-dtype fp8
-      --gpu-memory-utilization 0.90
+      --gpu-memory-utilization 0.85
       --kv-cache-memory-bytes 5350000000
       --enable-prefix-caching
       --enable-chunked-prefill
