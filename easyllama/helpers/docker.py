@@ -475,6 +475,14 @@ class DockerRuntime:
                 "start_period": 20_000_000_000,
                 "retries": 3,
             }
+        if contract.publish and contract.port:
+            # Bind the API (and lifecycle) ports to host loopback so host-network
+            # consumers can call the backend directly instead of through the swap
+            # proxy, and can still wake a slept backend themselves.
+            ports = {f"{contract.port}/tcp": ("127.0.0.1", contract.port)}
+            if contract.lifecycle_port:
+                ports[f"{contract.lifecycle_port}/tcp"] = ("127.0.0.1", contract.lifecycle_port)
+            kwargs["ports"] = ports
         if contract.gpu:
             kwargs.update(
                 runtime="nvidia",
