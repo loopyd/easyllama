@@ -20,7 +20,16 @@ from docker.types import DeviceRequest, Ulimit
 from ..config import CONTAINERPATH, IMAGE, RUNTIME, Config
 from ..servers import mode_def as server_mode_def, mode_defs as server_mode_defs
 from .builder import DockerBuilder
-from .cache import HostCache, ModelCache, PackageCache, PythonCache, RootCache
+from .cache import (
+    HostCache,
+    JitCache,
+    LmcacheCache,
+    ModelCache,
+    PackageCache,
+    PythonCache,
+    RootCache,
+    SlotCache,
+)
 from .images import ModeImages
 from .logger import LOG as APP_LOG
 from .orchestrator import ContainerContract, ProxyConfigCompiler
@@ -447,9 +456,7 @@ class DockerRuntime:
             },
         }
         if contract.health_path:
-            health_port = contract.lifecycle_port or (
-                18080 if contract.image is IMAGE.LMCACHE else contract.port
-            )
+            health_port = contract.lifecycle_port or contract.http_port or contract.port
             health_path = (
                 "/health"
                 if contract.lifecycle_port
@@ -763,6 +770,9 @@ class DockerRuntime:
         """Return persistent host caches in mount order."""
         return (
             RootCache("root", self.settings.dirs.root_cache, CONTAINERPATH.ROOT_CACHE),
+            JitCache("jit", self.settings.dirs.jit_cache, CONTAINERPATH.JIT_CACHE),
+            SlotCache("slot", self.settings.dirs.slot_cache, CONTAINERPATH.SLOT_CACHE),
+            LmcacheCache("lmcache", self.settings.dirs.lmcache, CONTAINERPATH.LMCACHE_DIR),
             PackageCache("pkg", self.settings.dirs.pkg_cache, CONTAINERPATH.PKG_CACHE),
             PythonCache("python", self.settings.dirs.python_cache, CONTAINERPATH.PYTHON_CACHE),
             ModelCache("models", self.settings.dirs.models, CONTAINERPATH.MODELS),

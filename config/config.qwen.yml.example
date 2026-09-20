@@ -16,58 +16,57 @@ routing:
           - qwen3-embeddings
           - qwen3-reranker
 macros:
-  qwen3_chat_target_hf: 0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF:RVN-Q4_K_M-multilingual-mtp.gguf
-  pi_emb_hf_model: Qwen/Qwen3-Embedding-0.6B-GGUF:Qwen3-Embedding-0.6B-f16.gguf
-  qwen3_reranker_hf: gpustack/bge-reranker-v2-m3-GGUF:bge-reranker-v2-m3-Q8_0.gguf
+  vllm_bin: /opt/venv/bin/vllm
+  qwen3_chat_target_hf: lyf/Qwen3.8-27B-Heretic-ARA-NVFP4-MTP-VL
+  embedding_model: /root/.cache/huggingface/hub/models--Qwen--Qwen3-Embedding-0.6B-GGUF/snapshots/370f27d7550e0def9b39c1f16d3fbaa13aa67728/Qwen3-Embedding-0.6B-f16.gguf
 models:
+  # port/lifecyclePort are pinned per model so adding or removing models never
+  # shifts an address (position-derived ports would break pinned deployments).
   qwen3-chat:
+    port: 9000
+    lifecyclePort: 9008
+    # LMCache chunk size = one vLLM block (1600) for this model's layout.
+    lmcacheChunkSize: 1600
     concurrencyLimit: 0
-    name: Qwen3.8 Chat 27B RVN Heretic Q4_K_M MTP
-    description: Primary thinking/tool-use model; multilingual RVN Heretic Q4_K_M with embedded MTP served by llama.cpp
-    cmd: '${server_bin}
-      server
-      qwen
-      --bin /app/bin/llama-server-qwen
+    env:
+      # flashinfer JIT-compile guardrails: cap ninja parallelism so the one-time
+      # kernel build cannot spawn one nvcc/cicc per core and blow the memory cgroup.
+      - MAX_JOBS=8
+      # LMCacheMPConnector shares KV through CUDA IPC, which vLLM's sleep-mode
+      # cuMem allocator does not support; these models therefore use the classic
+      # SIGTERM-on-swap lifecycle while LMCache preserves KV across swaps.
+    name: Qwen3.8 Chat 27B Heretic NVFP4 MTP
+    description: Primary thinking/tool-use model; Heretic Qwen3.8-27B NVFP4 on vLLM with MTP; --language-model-only skips the vision tower; KV offloaded to the shared LMCache server
+    cmd: '${vllm_bin}
+      serve
+      ${qwen3_chat_target_hf}
       --host 0.0.0.0
       --port ${PORT}
-      -hf ${qwen3_chat_target_hf}
-      --no-mmproj
-      --ctx-size 262144
-      --n-predict 32768
-      --n-gpu-layers all
-      --fit off
-      --parallel 4
-      --threads 8
-      --threads-batch 8
-      --kv-unified
-      --spec-type draft-mtp
-      --spec-draft-n-max 2
-      --spec-draft-n-min 0
-      --spec-draft-type-k q8_0
-      --spec-draft-type-v q8_0
-      --flash-attn on
-      --cache-type-k q8_0
-      --cache-type-v q8_0
-      --batch-size 4096
-      --ubatch-size 1024
-      --cache-prompt
-      --cache-ram 4096
-      --ctx-checkpoints 8
-      --load-mode mmap
-      --no-warmup
-      --no-webui
-      --jinja
-      --chat-template-file /chat_template/qwen3.8.jinja
-      --reasoning auto
-      --reasoning-preserve
-      --temp 1.0
-      --top-p 0.95
-      --top-k 20
-      --min-p 0.0
-      --repeat-penalty 1.0
+      --served-model-name qwen3-chat
+      --chat-template /chat_template/qwen3.8.jinja
+      --default-chat-template-kwargs ''{"preserve_thinking": true}''
+      --language-model-only
+      --max-model-len 131072
+      --max-num-seqs 16
+      --max-num-batched-tokens 8192
+      --kv-cache-dtype fp8
+      --gpu-memory-utilization 0.90
+      --kv-cache-memory-bytes 5350000000
+      --enable-prefix-caching
+      --enable-chunked-prefill
+      --speculative-config ''{"method":"mtp","num_speculative_tokens":2}''
+      --kv-transfer-config ''{"kv_connector":"LMCacheMPConnector","kv_connector_extra_config":{"lmcache.mp.host":"127.0.0.1","lmcache.mp.port":5555},"kv_role":"kv_both"}''
+      --trust-remote-code
+      --reasoning-parser qwen3
+      --enable-auto-tool-choice
+      --tool-call-parser qwen3_xml
+      --uvicorn-log-level info
+      --log-error-stack
       '
     cmdStop: /bin/kill -TERM ${PID}
   qwen3-embeddings:
+    port: 9004
+    lifecyclePort: 9010
     ttl: 0
     concurrencyLimit: 0
     name: Qwen3 Embeddings 0.6B FP16
@@ -78,7 +77,7 @@ models:
       --bin /app/bin/llama-server-qwen
       --host 0.0.0.0
       --port ${PORT}
-      -hf ${pi_emb_hf_model}
+      --model ${embedding_model}
       --n-gpu-layers all
       --device CUDA0
       --fit off
@@ -92,36 +91,24 @@ models:
       --cache-type-k f16
       --cache-type-v f16
       --no-mmap
+      --no-warmup
       --embedding
       --pooling last
-      --no-warmup
       '
     cmdStop: /bin/kill -TERM ${PID}
   qwen3-reranker:
+    port: 9006
+    lifecyclePort: 9011
     ttl: 0
     concurrencyLimit: 0
     name: BGE Reranker v2 M3 Q8_0
-    description: Compact GPU cross-encoder for query-document relevance, co-resident with embeddings
+    description: Compact GPU cross-encoder co-resident with embeddings in Qwen mode
     cmd: '${server_bin}
-      server
-      qwen
-      --bin /app/bin/llama-server-qwen
-      --host 0.0.0.0
-      --port ${PORT}
-      -hf ${qwen3_reranker_hf}
-      --n-gpu-layers all
-      --device CUDA0
-      --fit off
-      --threads 2
-      --threads-batch 2
-      --ctx-size 16384
-      --batch-size 8192
-      --ubatch-size 8192
-      --parallel 2
-      --embedding
-      --pooling rank
-      --reranking
-      --no-warmup
-      --no-webui
+      server qwen --bin /app/bin/llama-server-qwen
+      --host 0.0.0.0 --port ${PORT}
+      --model /root/.cache/huggingface/hub/models--gpustack--bge-reranker-v2-m3-GGUF/snapshots/3093af03b1a635e67b084b1d8c03c5f5e020fd05/bge-reranker-v2-m3-Q8_0.gguf
+      --n-gpu-layers all --device CUDA0 --fit off --threads 2 --threads-batch 2
+      --ctx-size 16384 --batch-size 8192 --ubatch-size 8192 --parallel 2
+      --embedding --pooling rank --reranking --no-warmup --no-webui
       '
     cmdStop: /bin/kill -TERM ${PID}

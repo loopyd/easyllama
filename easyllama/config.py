@@ -176,6 +176,9 @@ class CONTAINERPATH(StrEnum):
     ROOT_CACHE = "/root/.cache"
     PKG_CACHE = "/var/cache/apt"
     PYTHON_CACHE = f"{ROOT_CACHE}/pip"
+    JIT_CACHE = f"{ROOT_CACHE}/flashinfer"
+    SLOT_CACHE = f"{ROOT_CACHE}/slot-cache"
+    LMCACHE_DIR = f"{ROOT_CACHE}/lmcache"
     MODELS = f"{ROOT_CACHE}/huggingface/hub"
     CHAT_TEMPLATE = "/chat_template"
     MMPROJ = "/mmproj"
@@ -353,6 +356,9 @@ class ConfigDirs(DataModel):
     root_cache: Path = config_field("cache/root", env="ROOT_CACHE_DIR")
     pkg_cache: Path = config_field("cache/pkg", env="PKG_CACHE_DIR")
     python_cache: Path = config_field("cache/python", env="PYTHON_CACHE_DIR")
+    jit_cache: Path = config_field("cache/flashinfer-jit", env="JIT_CACHE_DIR")
+    slot_cache: Path = config_field("cache/slot-cache", env="SLOT_CACHE_DIR")
+    lmcache: Path = config_field("cache/lmcache", env="LMCACHE_CACHE_DIR")
     mmproj: Path = config_field("mmproj", env="MMPROJ_DIR")
     chat_template: Path = config_field("chat_template", env="CHAT_TEMPLATE_DIR")
     runtime: Path = config_field(".runtime", env="RUNTIME_DIR")

@@ -120,16 +120,46 @@ class FakeImages:
         return types.SimpleNamespace(name=name, tags=[name])
 
 
+class FakeNetwork:
+    """Emulate one docker network."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def remove(self) -> None:
+        """Remove the network."""
+        return
+
+
+class FakeNetworks:
+    """Emulate the docker networks collection."""
+
+    def __init__(self) -> None:
+        self.items: list[FakeNetwork] = []
+
+    def list(self, **_kwargs: Any) -> list[FakeNetwork]:
+        """List networks."""
+        return list(self.items)
+
+    def create(self, name: str, **_kwargs: Any) -> FakeNetwork:
+        """Create and record a network."""
+        network = FakeNetwork(name)
+        self.items.append(network)
+        return network
+
+
 class FakeClient:
     """Emulate the docker-py client surface used by DockerRuntime.
 
     Attributes:
         containers: The containers.
-        images: The images."""
+        images: The images.
+        networks: The networks."""
 
     def __init__(self, items: list[FakeContainer]) -> None:
         self.containers = FakeContainers(items)
         self.images = FakeImages()
+        self.networks = FakeNetworks()
         self.api: Any = self
 
     def ping(self) -> bool:
@@ -158,9 +188,9 @@ def _runtime(monkeypatch: pytest.MonkeyPatch, items: list[FakeContainer]) -> tup
 
 def test_start_sweeps_stale_dependency_containers(monkeypatch: pytest.MonkeyPatch) -> None:
     stale = FakeContainer(
-        "easyllama-llamacpp-llamacpp-qwen3-chat",
+        "easyllama-qwen-vllm-qwen3-chat",
         status="exited",
-        labels={"easyllama.managed": "true", "easyllama.mode": "llamacpp"},
+        labels={"easyllama.managed": "true", "easyllama.mode": "qwen"},
     )
     runtime, client = _runtime(monkeypatch, [stale])
 

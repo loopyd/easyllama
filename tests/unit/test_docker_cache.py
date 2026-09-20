@@ -19,10 +19,13 @@ from easyllama.config import (
 from easyllama.helpers.builder import DockerBuilder
 from easyllama.helpers.cache import (
     HostCache,
+    JitCache,
+    LmcacheCache,
     ModelCache,
     PackageCache,
     PythonCache,
     RootCache,
+    SlotCache,
 )
 from easyllama.helpers.docker import DockerRuntime
 import pytest
@@ -64,7 +67,7 @@ def test_config_string_enums() -> None:
 
 def test_mode_hardware_configuration() -> None:
     config = Config.load()
-    assert config.resources.profile(IMAGE.VLLM).ram is RAM_WEIGHT.MEDIUM
+    assert config.resources.profile(IMAGE.VLLM).ram is RAM_WEIGHT.HIGH
     assert config.resources.profile(IMAGE.LMCACHE).swap is SWAP_WEIGHT.MEDIUM
     assert config.resources.profile(IMAGE.LLAMACPP).cpu is CPU_WEIGHT.XHIGH
     assert config.resources.profiles.model_dump() == {
@@ -105,6 +108,9 @@ def test_host_cache_configuration() -> None:
             pkg_cache=root / "cache/pkg",
             python_cache=root / "cache/python",
             models=root / "cache/models",
+            jit_cache=root / "cache/flashinfer-jit",
+            slot_cache=root / "cache/slot-cache",
+            lmcache=root / "cache/lmcache",
         )
     )
     runtime = object.__new__(DockerRuntime)
@@ -112,13 +118,27 @@ def test_host_cache_configuration() -> None:
     caches = runtime.host_caches()
     assert tuple(type(cache) for cache in caches) == (
         RootCache,
+        JitCache,
+        SlotCache,
+        LmcacheCache,
         PackageCache,
         PythonCache,
         ModelCache,
     )
-    assert tuple(cache.name for cache in caches) == ("root", "pkg", "python", "models")
+    assert tuple(cache.name for cache in caches) == (
+        "root",
+        "jit",
+        "slot",
+        "lmcache",
+        "pkg",
+        "python",
+        "models",
+    )
     assert tuple(cache.container for cache in caches) == (
         CONTAINERPATH.ROOT_CACHE,
+        CONTAINERPATH.JIT_CACHE,
+        CONTAINERPATH.SLOT_CACHE,
+        CONTAINERPATH.LMCACHE_DIR,
         CONTAINERPATH.PKG_CACHE,
         CONTAINERPATH.PYTHON_CACHE,
         CONTAINERPATH.MODELS,
@@ -137,6 +157,9 @@ def _clean_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> DockerRun
             pkg_cache=tmp_path / "pkg",
             python_cache=tmp_path / "python",
             models=tmp_path / "models",
+            jit_cache=tmp_path / "jit",
+            slot_cache=tmp_path / "slot",
+            lmcache=tmp_path / "lmcache",
         )
     )
     runtime = object.__new__(DockerRuntime)
@@ -189,8 +212,8 @@ def test_qwen_lmcache_configuration() -> None:
     vllm_dockerfile = Path("docker/runtime-vllm.Dockerfile").read_text()
     lmcache_dockerfile = Path("docker/runtime-lmcache.Dockerfile").read_text()
     config = Path("config/config.qwen.yml.example").read_text()
-    assert "lmcache==0.5.4" in vllm_dockerfile
-    assert "lmcache==0.5.4" in lmcache_dockerfile
+    assert "lmcache==0.5.5" in vllm_dockerfile
+    assert "lmcache==0.5.5" in lmcache_dockerfile
     assert "vllm" not in lmcache_dockerfile
     from easyllama.helpers.images import ModeImages
 

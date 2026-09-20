@@ -1,6 +1,6 @@
 FROM builder-base AS vllm-builder
 ARG VLLM_REPO=https://github.com/vllm-project/vllm.git
-ARG VLLM_REF=v0.28.0
+ARG VLLM_REF=v0.29.0
 ARG BUILD_JOBS=1
 # RTX 5090 / Blackwell only: avoid compiling legacy SM75-SM110 kernels.
 ENV VLLM_TARGET_DEVICE=cuda

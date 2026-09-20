@@ -47,6 +47,36 @@ def test_compiler_selects_isolated_stages() -> None:
     assert "vllm-builder" not in content
 
 
+def test_vllm_heavy_layers_are_independent_of_app_source() -> None:
+    """Rebuilding easyllama/ must not invalidate the multi-GB vLLM install.
+
+    regression: the app source used to live in ``runtime-python``, which
+    ``runtime-vllm`` was based on, so any code edit re-ran the torch/vLLM
+    pip install (with no cache mount) and made the build take hours.
+    """
+    compiled = DockerfileCompiler(Path.cwd()).compile(MODE.QWEN, IMAGE.VLLM)
+    content = compiled.path.read_text()
+
+    assert "FROM runtime-python-deps AS runtime-vllm-deps" in content
+    assert "FROM runtime-vllm-deps AS runtime-vllm" in content
+    assert "FROM runtime-python AS runtime-vllm" not in content
+
+    deps_stage = content.index("AS runtime-vllm-deps")
+    app_stage = content.index("FROM runtime-vllm-deps AS runtime-vllm")
+    app_copy = content.index("COPY easyllama/ /app/easyllama/", app_stage)
+    assert deps_stage < app_stage < app_copy
+
+
+def test_python_deps_stage_has_no_app_source() -> None:
+    """The shared dependency stage stays stable across application edits."""
+    contents = Path("docker/runtime-python.Dockerfile").read_text()
+    deps_stage = contents.split("FROM runtime-python-deps AS runtime-python")[0]
+
+    assert "FROM runtime-base AS runtime-python-deps" in deps_stage
+    assert "COPY easyllama/" not in deps_stage
+    assert "pip install --no-deps /app" not in deps_stage
+
+
 def test_mode_image_dependencies() -> None:
     assert tuple(item.image for item in ModeImages.for_mode(MODE.LLAMACPP).dependencies) == (
         IMAGE.LLAMASWAP,
@@ -79,9 +109,9 @@ def test_runtime_base_has_no_backend() -> None:
 def test_proxy_config_has_explicit_container_contracts() -> None:
     plan = ProxyConfigCompiler(MODE.QWEN).compile(Path("config/config.qwen.yml.example"), "secret")
     chat = plan.config["models"]["qwen3-chat"]
-    assert chat["cmd"].endswith("http://easyllama-qwen-llamacpp-qwen3-chat:9006/run")
-    assert chat["cmdStop"].endswith("http://easyllama-qwen-llamacpp-qwen3-chat:9006/sleep")
-    assert chat["proxy"] == "http://easyllama-qwen-llamacpp-qwen3-chat:9000"
+    assert chat["cmd"].endswith("http://easyllama-qwen-vllm-qwen3-chat:9008/run")
+    assert chat["cmdStop"].endswith("http://easyllama-qwen-vllm-qwen3-chat:9008/sleep")
+    assert chat["proxy"] == "http://easyllama-qwen-vllm-qwen3-chat:9000"
     assert "env" not in chat and "type" not in chat
     assert plan.config["routing"]["router"]["settings"]["groups"]["gpu"] == {
         "swap": True,
@@ -95,30 +125,25 @@ def test_proxy_config_has_explicit_container_contracts() -> None:
     assert plan.config["globalTTL"] == 1800
     assert "ttl" not in chat
     assert "macros" not in plan.config
-    chat, embeddings = plan.containers[:2]
-    assert chat.health_path == "/v1/models" and chat.stop_signal == "SIGTERM"
-    assert chat.lifecycle_port == 9006
-    chat_command = " ".join(chat.command)
-    assert "/app/bin/llama-server-qwen" in chat_command
-    assert "RVN-Q4_K_M-multilingual-mtp.gguf" in chat_command
-    assert "--ctx-size 262144" in chat_command
-    assert "--parallel 4" in chat_command
-    assert "--batch-size 4096 --ubatch-size 1024" in chat_command
-    assert "--cache-type-k q8_0 --cache-type-v q8_0" in chat_command
-    assert "--spec-type draft-mtp --spec-draft-n-max 2" in chat_command
+    vllm_chat = next(c for c in plan.containers if c.name.endswith("vllm-qwen3-chat"))
+    assert vllm_chat.health_path == "/health" and vllm_chat.stop_signal == "SIGTERM"
+    assert vllm_chat.lifecycle_port == 9008
+    chat_command = " ".join(vllm_chat.command)
+    assert "/opt/venv/bin/vllm serve" in chat_command
+    assert "--language-model-only" in chat_command
+    assert "LMCacheMPConnector" in chat_command
+    embeddings = next(
+        c for c in plan.containers if c.name.endswith("llamacpp-qwen3-embeddings")
+    )
     assert embeddings.health_path == "/v1/models"
-    assert embeddings.lifecycle_port == 9007
-    api_ports = [c.port for c in plan.containers if c.port is not None]
-    assert api_ports == [9000, 9002, 9004]
-    allocated = {p for c in plan.containers for p in (c.port, c.lifecycle_port) if p is not None}
-    assert len(allocated) == 2 * len(plan.containers)
-    assert all(port + 1 not in allocated for port in api_ports)
+    assert embeddings.lifecycle_port == 9010
+    assert "--host 0.0.0.0" in " ".join(embeddings.command)
+    lmcache = next(c for c in plan.containers if c.image is IMAGE.LMCACHE)
+    assert lmcache.port == 5555
     embeddings_command = " ".join(embeddings.command)
-    assert "--host 0.0.0.0" in embeddings_command
     assert "--ctx-size 131072" in embeddings_command
     assert "--batch-size 512 --ubatch-size 512 --parallel 4" in embeddings_command
-    assert chat.environment == ("HF_TOKEN=${HF_TOKEN}",)
-    assert embeddings.environment == ("HF_TOKEN=${HF_TOKEN}",)
+    assert any("HF_TOKEN" in entry for entry in embeddings.environment)
 
 
 def test_proxy_compiler_expands_command_macros() -> None:
@@ -404,13 +429,16 @@ def test_lmcache_contract_uses_nested_config(monkeypatch: Any) -> None:
     from easyllama.config import Config
 
     monkeypatch.setenv("EASYLLAMA_ROOT", str(Path.cwd()))
-    monkeypatch.setenv("EASYLLAMA_LMCACHE_CHUNK_SIZE", "2048")
     monkeypatch.setenv("EASYLLAMA_LMCACHE_L1_SIZE_GB", "48")
     settings = Config.load(mode_override=MODE.QWEN)
     plan = ProxyConfigCompiler(MODE.QWEN, settings=settings).compile(
         Path("config/config.qwen.yml.example")
     )
-    assert all(contract.image is not IMAGE.LMCACHE for contract in plan.containers)
+    lmcache = [contract for contract in plan.containers if contract.image is IMAGE.LMCACHE]
+    assert len(lmcache) == 1
+    command = " ".join(lmcache[0].command)
+    assert "--l1-size-gb 48" in command
+    assert "--chunk-size 1600" in command
 
 
 def test_network_name_uses_mode() -> None:

@@ -99,6 +99,11 @@ for _mode in MODE:
                             "--eviction-policy",
                             "LRU",
                             "--separate-object-groups",
+                            # L2 tier: persist evicted KV chunks to the tracked
+                            # host cache mount so they survive CPU-RAM eviction
+                            # and container restarts.
+                            "--l2-adapter",
+                            '{{"type":"fs","base_path":"/root/.cache/lmcache"}}',
                         ),
                         port=5555,
                         health_path="/health",

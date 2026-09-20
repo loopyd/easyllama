@@ -5,6 +5,7 @@
     "root_cache": "cache/root",
     "pkg_cache": "cache/pkg",
     "python_cache": "cache/python",
+    "jit_cache": "cache/flashinfer-jit",
     "mmproj": "mmproj",
     "chat_template": "chat_template",
     "runtime": ".runtime"
@@ -66,8 +67,8 @@
       },
       "vllm": {
         "cpu": "xhigh",
-        "ram": "medium",
-        "swap": "medium"
+        "ram": "high",
+        "swap": "high"
       },
       "lmcache": {
         "cpu": "medium",
@@ -109,6 +110,8 @@
       },
       "services": [
         "llamaswap",
+        "vllm",
+        "lmcache",
         "llamacpp"
       ]
     },

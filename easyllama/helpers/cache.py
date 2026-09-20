@@ -50,6 +50,35 @@ class RootCache(HostCache):
     """Persist the container root user's general cache."""
 
 
+class JitCache(HostCache):
+    """Persist flashinfer JIT-compiled CUDA kernels.
+
+    vLLM compiles backend kernels (MoE GEMM and friends) on first use with
+    nvcc; keeping the compiled .so files on the host means container
+    rebuilds and restarts do not re-run a multi-minute JIT pass, and a
+    failed first compile stays diagnosable and retryable."""
+
+
+class SlotCache(HostCache):
+    """Persist llama.cpp slot KV caches across model swaps.
+
+    On sleep, the lifecycle controller saves every non-empty slot via
+    ``POST /slots/{id}?action=save`` into this directory (the server's
+    ``--slot-save-path``); after a cold start it restores the newest save
+    into slot 0, so a swapped-back session resumes with its conversation
+    KV instead of re-prefilling the whole context."""
+
+
+class LmcacheCache(HostCache):
+    """Persist LMCache's local-disk KV tier for vLLM.
+
+    The in-process LMCache connector offloads KV chunks that no longer fit
+    the GPU-resident prefix cache into this directory. Chunks survive
+    sleep/wake cycles (vLLM sleep discards the GPU KV) and container
+    restarts, so repeated prompts are rehydrated from disk instead of
+    being prefilled from scratch."""
+
+
 class PackageCache(HostCache):
     """Persist the container system package-manager cache."""
 

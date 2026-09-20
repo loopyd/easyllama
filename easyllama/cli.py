@@ -351,7 +351,8 @@ def _clean_config(parser: argparse.ArgumentParser) -> None:
         default=None,
         metavar="CACHES",
         help=(
-            "host caches to wipe as a comma-separated list (root, pkg, python, models); "
+            "host caches to wipe as a comma-separated list "
+            "(root, jit, slot, lmcache, pkg, python, models); "
             "omitted keeps all caches, empty wipes all"
         ),
     )

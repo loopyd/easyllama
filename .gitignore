@@ -16,6 +16,9 @@ cache/*/*
 !cache/pkg/.gitkeep
 !cache/python/.gitkeep
 !cache/models/.gitkeep
+!cache/flashinfer-jit/.gitkeep
+!cache/slot-cache/.gitkeep
+!cache/lmcache/.gitkeep
 mmproj/*
 !mmproj/.gitkeep
 chat_template/*

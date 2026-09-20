@@ -18,6 +18,13 @@ _ENV = re.compile(r"\$\{env\.([A-Za-z_][A-Za-z0-9_]*)\}")
 _MACRO = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_-]*)\}")
 _NAME = re.compile(r"[^a-z0-9]+")
 
+# Each vLLM model gets its own LMCache server: the connector's chunk size must be
+# a multiple of that model's vLLM block size, which is model-specific, so one
+# server cannot serve multiple models.
+LMCACHE_PORT_BASE = 5555
+LMCACHE_HTTP_PORT_BASE = 18080
+LMCACHE_PROMETHEUS_PORT_BASE = 19090
+
 
 @dataclass(frozen=True, slots=True)
 class ContainerContract:
@@ -32,6 +39,7 @@ class ContainerContract:
     gpu: bool = False
     environment: tuple[str, ...] = ()
     lifecycle_port: int | None = None
+    http_port: int | None = None
 
     @property
     def endpoint(self) -> str | None:
@@ -139,10 +147,31 @@ class ProxyConfigCompiler:
         source_payload = yaml.safe_load(source.read_text()) or {}
         payload = {**self.ROOT_DEFAULTS, **source_payload}
         contracts: list[ContainerContract] = []
+        lmcache_servers: list[tuple[str, int, int]] = []
         macros = {**self.MACRO_DEFAULTS, **(payload.get("macros") or {})}
         models = payload.get("models", {})
         base = self._start_port(payload, source)
         host_network = self.settings is not None and self.settings.docker.network_mode == "host"
+        claimed_ports: dict[int, str] = {}
+
+        def claim(value: int, model_id: str, *, reserve_next: bool = False) -> None:
+            """Reserve a port for one model.
+
+            API ports also reserve ``port + 1``: multi-socket backends
+            (FreeToken) bind the server port plus one for their
+            torch.distributed store, so that slot must stay clear of every
+            other model's address. Lifecycle ports are single listeners.
+            """
+            slots = (value, value + 1) if reserve_next else (value,)
+            for port in slots:
+                owner = claimed_ports.get(port)
+                if owner is not None:
+                    raise SystemExit(
+                        f"model {model_id} port collision: {port} is already "
+                        f"assigned to {owner}; set distinct port/lifecyclePort values"
+                    )
+                claimed_ports[port] = model_id
+
         for index, (model_id, model) in enumerate(models.items()):
             command = self._expand(str(model["cmd"]).strip(), macros)
             model.pop("cmdStop", None)
@@ -155,8 +184,17 @@ class ProxyConfigCompiler:
             # server_port + 1 for its torch.distributed store). Lifecycle
             # listeners start after the reserved band so they never land on a
             # backend slot or on another model's API port.
-            port = base + 2 * index
-            lifecycle_port = base + 2 * len(models) + index
+            #
+            # Positions shift whenever the model set changes, so a model may
+            # pin explicit ``port``/``lifecyclePort`` values: pinned addresses
+            # keep captured container commands (and any deployment pinned to
+            # them) valid when other models are added or removed.
+            port = int(model.get("port") or 0) or base + 2 * index
+            lifecycle_port = int(model.get("lifecyclePort") or 0) or base + 2 * len(models) + index
+            claim(port, model_id, reserve_next=True)
+            claim(lifecycle_port, model_id)
+            model.pop("port", None)
+            model.pop("lifecyclePort", None)
             model_name = _NAME.sub("-", model_id.lower()).strip("-")
             name = f"easyllama-{self.mode}-{image}-{model_name}"
             command = _PORT.sub(str(port), command)
@@ -167,10 +205,24 @@ class ProxyConfigCompiler:
             if image is IMAGE.VLLM:
                 for obsolete in ("/app/bin/log-exec", "/app/bin/qwen-lmcache-vllm"):
                     command = command.replace(obsolete, "")
-                command = command.replace(
-                    '"lmcache.mp.host":"127.0.0.1"',
-                    f'"lmcache.mp.host":"easyllama-{self.mode}-{IMAGE.LMCACHE}"',
-                )
+                # A model opts into LMCache by declaring the MP connector in its
+                # command; each such model gets its own server because the chunk
+                # size must be a multiple of that model's own vLLM block size.
+                lmcache_chunk = int(model.pop("lmcacheChunkSize", 0) or 0)
+                model.pop("lmcachePort", None)
+                if '"lmcache.mp.host"' in command:
+                    lmcache_port = LMCACHE_PORT_BASE + len(lmcache_servers)
+                    lmcache_name = f"easyllama-{self.mode}-{IMAGE.LMCACHE}-{model_name}"
+                    claim(lmcache_port, model_id)
+                    command = command.replace(
+                        '"lmcache.mp.host":"127.0.0.1"',
+                        f'"lmcache.mp.host":"{lmcache_name}"',
+                    )
+                    command = command.replace(
+                        '"lmcache.mp.port":5555',
+                        f'"lmcache.mp.port":{lmcache_port}',
+                    )
+                    lmcache_servers.append((lmcache_name, lmcache_port, lmcache_chunk))
             command = " ".join(command.splitlines())
             contracts.append(
                 ContainerContract(
@@ -200,27 +252,38 @@ class ProxyConfigCompiler:
                     "useModelName": model_id,
                 }
             )
-        if self.images.requires(IMAGE.LMCACHE) and any(
-            contract.image is IMAGE.VLLM for contract in contracts
-        ):
+        if lmcache_servers:
             if host_network:
                 raise SystemExit("host networking is not supported for LMCache dependencies")
             dependency = self.images.dependency(IMAGE.LMCACHE)
-            command = tuple(item.replace("{mode}", str(self.mode)) for item in dependency.command)
-            if self.settings is not None:
-                command = tuple(item.format(lmcache=self.settings.lmcache) for item in command)
-            contracts.insert(
-                0,
-                ContainerContract(
-                    name=dependency.name(self.mode),
-                    image=dependency.image,
-                    command=command,
-                    port=dependency.port,
-                    health_path=dependency.health_path,
-                    stop_signal=dependency.stop_signal,
-                    gpu=dependency.gpu,
-                ),
-            )
+            for offset, (server_name, server_port, chunk_size) in enumerate(lmcache_servers):
+                http_port = LMCACHE_HTTP_PORT_BASE + offset
+                command = list(dependency.command)
+                for flag, value in (
+                    ("--instance-id", server_name),
+                    ("--port", server_port),
+                    ("--http-port", http_port),
+                    ("--prometheus-port", LMCACHE_PROMETHEUS_PORT_BASE + offset),
+                ):
+                    command[command.index(flag) + 1] = str(value)
+                if chunk_size:
+                    command[command.index("--chunk-size") + 1] = str(chunk_size)
+                command = tuple(item.replace("{mode}", str(self.mode)) for item in command)
+                if self.settings is not None:
+                    command = tuple(item.format(lmcache=self.settings.lmcache) for item in command)
+                contracts.insert(
+                    0,
+                    ContainerContract(
+                        name=server_name,
+                        image=dependency.image,
+                        command=command,
+                        port=server_port,
+                        http_port=http_port,
+                        health_path=dependency.health_path,
+                        stop_signal=dependency.stop_signal,
+                        gpu=dependency.gpu,
+                    ),
+                )
         payload.pop("macros", None)
         configured = set(models)
         members = payload["routing"]["router"]["settings"]["groups"]["gpu"]["members"]

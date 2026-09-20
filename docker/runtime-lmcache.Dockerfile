@@ -6,5 +6,5 @@ RUN --mount=type=cache,id=llamacpp-apt-cache-lmcache,target=/var/cache/apt,shari
         gcc libc6-dev cuda-nvcc-13-0 libcublas-dev-13-0 libcurand-dev-13-0 python3-dev \
     && /opt/venv/bin/pip install \
         --extra-index-url https://download.pytorch.org/whl/cu130 \
-        torch==2.13.0 lmcache==0.5.4 openai
+        torch==2.13.0 lmcache==0.5.5 openai
 ENV PATH=/opt/venv/bin:/usr/local/bin:/app/bin:${PATH}

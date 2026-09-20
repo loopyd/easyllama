@@ -227,16 +227,17 @@ Most-used host commands through `./run.sh`.
 | `./run.sh status` | Show runtime status and built images |
 | `./run.sh clean` | Remove the current mode stack, private network, and images; host caches are kept |
 | `./run.sh clean --all-images` | Remove all mode images and the runtime container; host caches are kept |
-| `./run.sh clean --wipe-cache` | Same, plus wipe every host cache (`root`, `pkg`, `python`, `models`) |
-| `./run.sh clean --wipe-cache models` | Same, plus wipe only the listed caches (comma-separated: `root`, `pkg`, `python`, `models`) |
+| `./run.sh clean --wipe-cache` | Same, plus wipe every host cache (`root`, `jit`, `pkg`, `python`, `models`) |
+| `./run.sh clean --wipe-cache models` | Same, plus wipe only the listed caches (comma-separated: `root`, `jit`, `pkg`, `python`, `models`) |
+| `./run.sh clean --wipe-cache jit` | Wipe only the flashinfer JIT kernel cache; vLLM recompiles its kernels on next start |
 | `./run.sh serve` | Run `llama-swap` inside container |
 | `./run.sh server ...` | Run mode-specific upstream server directly |
 | `./run.sh help` | Show CLI help |
 
 `clean` no longer touches host caches by default: repeat cleans while debugging keep `models`,
-`pkg`, and `python` warm, so re-downloads (model weights, package archives) do not delay the next
-start or image build. Wipe them explicitly with `--wipe-cache [list]` when a cache is corrupt or
-you want a cold-cache test.
+`pkg`, `python`, and `jit` warm, so re-downloads (model weights, package archives) and vLLM's
+flashinfer kernel compilation do not delay the next start or image build. Wipe them explicitly
+with `--wipe-cache [list]` when a cache is corrupt or you want a cold-cache test.
 
 ## File map
 
