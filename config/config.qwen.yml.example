@@ -43,17 +43,19 @@ models:
       # SIGTERM-on-swap lifecycle while LMCache preserves KV across swaps.
     name: Qwen3.8 Chat 27B Heretic NVFP4 MTP
     description: Primary thinking/tool-use model; Heretic Qwen3.8-27B NVFP4 on vLLM with MTP; --language-model-only skips the vision tower; KV offloaded to the shared LMCache server
-    # --gpu-memory-utilization stays 0.85. This is a genuine squeeze on a 32 GiB
-    # card. At 0.75 the chat engine starts reliably but leaves too little VRAM
-    # for the search group: /v1/embeddings and /v1/rerank stall and never serve
-    # (measured: 400s client timeout, chat never even evicted). At 0.85 the aux
-    # models load and serve, but the chat engine cannot start while the search
-    # group is still resident (vLLM's startup gate needs 26.64 GiB free, only
-    # ~24.18 GiB is available with them loaded), so a chat start that overlaps
-    # an unload fails with 500 'upstream command exited prematurely'. Keep 0.85
-    # and avoid overlapping starts - see the Hindsight concurrency and batch
-    # settings, which serialise the swap-heavy retain workload. The 128K context
-    # is unaffected: the KV cache is pinned by --kv-cache-memory-bytes.
+    # --gpu-memory-utilization is 0.85. On this 32 GiB card the chat cannot
+    # reliably restart while the search group is resident: llama-swap evicts the
+    # group asynchronously, so vLLM's synchronous startup gate (free >= util*31.34
+    # at engine init) can still see the aux models and the LMCache server holding
+    # ~12.9 GiB and fail with 'Free memory ... less than desired GPU memory
+    # utilization' -> engine init failure -> HTTP 500 'upstream command exited
+    # prematurely'. Measured: 0.79 still fails the gate, 0.75 fails differently
+    # (the pinned 4.98 GiB KV cache OOMs), and reducing the embeddings context
+    # 131072 -> 32768 (which frees ~11 GiB in the search group) does not close the
+    # race either. The aux routes do serve correctly - llama-swap starts,
+    # health-checks and evicts them - whenever the chat is not saturated. The 128K
+    # chat context is unaffected: the KV cache is pinned by
+    # --kv-cache-memory-bytes.
     cmd: '${vllm_bin}
       serve
       ${qwen3_chat_target_hf}
@@ -88,6 +90,12 @@ models:
     concurrencyLimit: 0
     name: Qwen3 Embeddings 0.6B FP16
     description: Dense embedding model for vector search, RAG, similarity
+    # Context was 131072 across --parallel 4 (n_ctx_slot 32768). At f16 KV that is
+    # ~15 GiB of the 32 GiB card for an embedding server that only ever sees
+    # small chunks, and it is what starved the chat's restart: with the search
+    # group loaded the chat could not pass vLLM's startup gate. 32768 total
+    # (8192 per slot) restores the headroom the swap design needs. This is not
+    # the chat's 128K context, which is unaffected.
     cmd: '${server_bin}
       server
       qwen
@@ -100,7 +108,7 @@ models:
       --fit off
       --threads 4
       --threads-batch 4
-      --ctx-size 131072
+      --ctx-size 32768
       --batch-size 512
       --ubatch-size 512
       --parallel 4
