@@ -43,6 +43,14 @@ models:
       # SIGTERM-on-swap lifecycle while LMCache preserves KV across swaps.
     name: Qwen3.8 Chat 27B Heretic NVFP4 MTP
     description: Primary thinking/tool-use model; Heretic Qwen3.8-27B NVFP4 on vLLM with MTP; --language-model-only skips the vision tower; KV offloaded to the shared LMCache server
+    # --gpu-memory-utilization is 0.75, not 0.85: the chat engine must be able to
+    # start while the search group is resident, because llama-swap evicts it
+    # asynchronously. With embeddings + reranker + the LMCache server loaded only
+    # ~24.18 GiB of 31.34 GiB is free, and vLLM's startup gate rejects
+    # util*31.34 > free, so 0.85 (26.64 GiB) crash-loops the engine
+    # ('Free memory ... less than desired GPU memory utilization') and every chat
+    # request returns 500. 0.75 needs 23.5 GiB and fits with margin. The 128K
+    # context is unaffected: the KV cache is pinned by --kv-cache-memory-bytes.
     cmd: '${vllm_bin}
       serve
       ${qwen3_chat_target_hf}
@@ -56,7 +64,7 @@ models:
       --max-num-seqs 16
       --max-num-batched-tokens 8192
       --kv-cache-dtype fp8
-      --gpu-memory-utilization 0.85
+      --gpu-memory-utilization 0.75
       --kv-cache-memory-bytes 5350000000
 
       --enable-prefix-caching
