@@ -25,3 +25,4 @@
 {"type":"oracle_followup_attempted","goalId":"mua6od6j-0t6njx","fingerprint":"04fb02aa30c64c03e4a90dbd","adviceId":"04fb02aa30c64c03e4a90dbd-Classify__quiesce_arriva","firstToolName":"write","at":"2026-09-20T21:02:03.574Z"}
 {"goalId":"mua6od6j-0t6njx","taskId":"task-4","at":"2026-09-20T21:53:29.319Z","type":"task_complete","evidence":"health ready; runnable pending 17738->17737 over 30min (arrivals 0), 1 completion, 0 emb/rerank errors, 0 retry storms, 0 gate/OOM. Backlog 14,208 ops 7-14d old, oldest-first claim; drain ~1/30min."}
 {"goalId":"mua6od6j-0t6njx","taskId":"task-5","at":"2026-09-20T21:53:29.319Z","type":"task_started"}
+{"type":"task_complete","goalId":"mua6od6j-0t6njx","taskId":"task-5","evidence":"live config==example (MATCH), stack restarted from it (chat 200 27s, 5 containers healthy), dotfiles renderer check: 589 files/65 keys 0 mismatch, both repos clean+HEAD==origin (01f442c/3f01f45), deci","at":"2026-09-20T22:34:18.644Z"}

@@ -43,19 +43,18 @@ models:
       # SIGTERM-on-swap lifecycle while LMCache preserves KV across swaps.
     name: Qwen3.8 Chat 27B Heretic NVFP4 MTP
     description: Primary thinking/tool-use model; Heretic Qwen3.8-27B NVFP4 on vLLM with MTP; --language-model-only skips the vision tower; KV offloaded to the shared LMCache server
-    # --gpu-memory-utilization is 0.85. On this 32 GiB card the chat cannot
-    # reliably restart while the search group is resident: llama-swap evicts the
-    # group asynchronously, so vLLM's synchronous startup gate (free >= util*31.34
-    # at engine init) can still see the aux models and the LMCache server holding
-    # ~12.9 GiB and fail with 'Free memory ... less than desired GPU memory
-    # utilization' -> engine init failure -> HTTP 500 'upstream command exited
-    # prematurely'. Measured: 0.79 still fails the gate, 0.75 fails differently
-    # (the pinned 4.98 GiB KV cache OOMs), and reducing the embeddings context
-    # 131072 -> 32768 (which frees ~11 GiB in the search group) does not close the
-    # race either. The aux routes do serve correctly - llama-swap starts,
-    # health-checks and evicts them - whenever the chat is not saturated. The 128K
-    # chat context is unaffected: the KV cache is pinned by
-    # --kv-cache-memory-bytes.
+    # --gpu-memory-utilization is 0.79, and that is a measured value, not a guess.
+    # vLLM's startup gate needs `free >= util*31.34` at engine init, and the
+    # LMCache server keeps this model's KV pool registered (~6.3 GiB) across
+    # swaps, so at most ~25.0 GiB can ever be free: util must be <= ~0.799 or a
+    # chat restart fails with 'Free memory on device cuda:0 ... less than desired
+    # GPU memory utilization' and the request becomes HTTP 500 'upstream command
+    # exited prematurely'. Do not raise it without first making LMCache release
+    # that pool on swap-out. It cannot go much lower either: at 0.75 the pinned
+    # 4.98 GiB KV cache fails to allocate and the search group then starves.
+    # The qwen3-embeddings context was cut 131072 -> 32768 so the search group no
+    # longer pushes the chat over the gate. The 128K chat context is unaffected:
+    # the KV cache is pinned by --kv-cache-memory-bytes.
     cmd: '${vllm_bin}
       serve
       ${qwen3_chat_target_hf}
@@ -69,7 +68,7 @@ models:
       --max-num-seqs 16
       --max-num-batched-tokens 8192
       --kv-cache-dtype fp8
-      --gpu-memory-utilization 0.85
+      --gpu-memory-utilization 0.79
       --kv-cache-memory-bytes 5350000000
 
       --enable-prefix-caching
