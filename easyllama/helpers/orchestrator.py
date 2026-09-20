@@ -40,7 +40,6 @@ class ContainerContract:
     environment: tuple[str, ...] = ()
     lifecycle_port: int | None = None
     http_port: int | None = None
-    publish: bool = False
 
     @property
     def endpoint(self) -> str | None:
@@ -196,10 +195,6 @@ class ProxyConfigCompiler:
             claim(lifecycle_port, model_id)
             model.pop("port", None)
             model.pop("lifecyclePort", None)
-            # A model may opt into a host-loopback port binding so host-network
-            # consumers (for example Hindsight) can reach its API directly
-            # instead of going through the swap proxy.
-            publish = bool(model.pop("publish", False))
             model_name = _NAME.sub("-", model_id.lower()).strip("-")
             name = f"easyllama-{self.mode}-{image}-{model_name}"
             command = _PORT.sub(str(port), command)
@@ -239,7 +234,6 @@ class ProxyConfigCompiler:
                     gpu=True,
                     environment=environment,
                     lifecycle_port=lifecycle_port,
-                    publish=publish,
                 )
             )
             endpoint_host = "127.0.0.1" if host_network else name

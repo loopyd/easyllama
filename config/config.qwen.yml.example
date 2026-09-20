@@ -66,7 +66,6 @@ models:
     cmdStop: /bin/kill -TERM ${PID}
   qwen3-embeddings:
     port: 9004
-    publish: true
     lifecyclePort: 9010
     ttl: 0
     concurrencyLimit: 0
@@ -99,7 +98,6 @@ models:
     cmdStop: /bin/kill -TERM ${PID}
   qwen3-reranker:
     port: 9006
-    publish: true
     lifecyclePort: 9011
     ttl: 0
     concurrencyLimit: 0
