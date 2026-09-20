@@ -148,7 +148,11 @@ def test_proxy_config_has_explicit_container_contracts() -> None:
     lmcache = next(c for c in plan.containers if c.image is IMAGE.LMCACHE)
     assert lmcache.port == 5555
     embeddings_command = " ".join(embeddings.command)
-    assert "--ctx-size 131072" in embeddings_command
+    # The embedding server is sized for the small chunks it actually sees: at
+    # 131072 total context the f16 KV cache held ~15 GiB of a 32 GiB card and
+    # starved the chat's restart. 32768 total (8192 per slot across --parallel 4)
+    # keeps the search group from pushing the chat over vLLM's startup gate.
+    assert "--ctx-size 32768" in embeddings_command
     assert "--batch-size 512 --ubatch-size 512 --parallel 4" in embeddings_command
     assert any("HF_TOKEN" in entry for entry in embeddings.environment)
 
