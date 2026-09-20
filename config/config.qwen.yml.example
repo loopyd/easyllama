@@ -1,3 +1,9 @@
+# Bound the silent start wait: llama-swap aborts a start that cannot become
+# healthy after this many seconds instead of hanging for the 1800s default.
+# 300s is ~11x the measured warm-cache cold start of the chat backend (27.4s,
+# 2026-09-20). Raise it if you wipe the flashinfer JIT cache (`clean
+# --wipe-cache jit`), which makes the next vLLM start recompile kernels.
+healthCheckTimeout: 300
 globalTTL: 1800
 routing:
   router:

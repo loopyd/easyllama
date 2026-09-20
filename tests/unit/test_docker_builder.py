@@ -119,8 +119,15 @@ def test_proxy_config_has_explicit_container_contracts() -> None:
         "members": ["qwen3-chat"],
     }
     assert plan.config["apiKeys"] == ["secret"]
-    assert plan.config["healthCheckTimeout"] == 1800
+    # The qwen profile bounds the model start wait so a start that cannot become
+    # healthy fails observably instead of hanging for the 1800s default; 300s is
+    # ~11x the measured warm-cache cold start of the chat backend. The compiler's
+    # global default stays 1800 for profiles whose first start legitimately takes
+    # longer (for example glm5.3-flash's ~160 GiB checkpoint).
+    assert plan.config["healthCheckTimeout"] == 300
     assert plan.config["logLevel"] == "info"
+    # sendLoadingState stays disabled by design (v0.3.2) so llama-swap loading and
+    # switching messages do not pollute client reasoning/context.
     assert plan.config["sendLoadingState"] is False
     assert plan.config["globalTTL"] == 1800
     assert "ttl" not in chat
