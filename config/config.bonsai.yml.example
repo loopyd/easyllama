@@ -77,7 +77,7 @@ models:
       --device CUDA0
       --fit off
       -c 262144
-      --parallel 4
+      --parallel 12
       --kv-unified
       --batch-size 2048
       --ubatch-size 512
@@ -91,7 +91,7 @@ models:
       --jinja
       --chat-template-file /chat_template/qwen3.8.jinja
       --reasoning-preserve
-      --reasoning-budget 4096
+      --reasoning-budget 1024
       --reasoning-format deepseek
       --no-mmap
       --no-warmup

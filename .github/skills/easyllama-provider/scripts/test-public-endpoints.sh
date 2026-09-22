@@ -104,7 +104,11 @@ print(settings.credentials.api_key or "")
 PY
 )
 BASE_URL="${BASE_URL:-${resolved_config[0]}}"
-CHAT_MODEL="${CHAT_MODEL:-qwen3-chat}"
+case "${MODE}" in
+  bonsai) DEFAULT_CHAT_MODEL="bonsai-chat" ;;
+  *) DEFAULT_CHAT_MODEL="qwen3-chat" ;;
+esac
+CHAT_MODEL="${CHAT_MODEL:-${DEFAULT_CHAT_MODEL}}"
 GEN_MODEL="${GEN_MODEL:-${CHAT_MODEL}}"
 EMBED_MODEL="${EMBED_MODEL:-qwen3-embeddings}"
 EXPECTED_EMBED_DIM="${EXPECTED_EMBED_DIM:-}"
@@ -159,6 +163,14 @@ embed_dim="$(jq -r '.data[0].embedding | length' <<<"${embed_json}")"
 if [[ -n "${EXPECTED_EMBED_DIM}" && "${embed_dim}" != "${EXPECTED_EMBED_DIM}" ]]; then
   fail "unexpected embedding dimension: got ${embed_dim}, expected ${EXPECTED_EMBED_DIM}"
 fi
+
+case "${MODE}" in
+  bonsai|qwen)
+    echo "+ POST /v1/rerank (qwen3-reranker)"
+    rerank_json="$(request_json POST /v1/rerank '{"model":"qwen3-reranker","query":"capital of France","documents":["Paris is the capital of France.","Bananas are yellow."]}')"
+    assert_jq "rerank response has results" '.results | type == "array" and length > 0' "${rerank_json}"
+    ;;
+esac
 
 if [[ "${CHAT_MODEL}" != "${EMBED_MODEL}" ]]; then
   echo "+ POST /v1/chat/completions after embeddings"

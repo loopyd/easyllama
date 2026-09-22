@@ -26,6 +26,27 @@ Format follows Keep a Changelog style where possible, based on published release
 - Hindsight retain extraction no longer fails with `JSON parse error from Responses reply (... scope=retain_extract_facts ...): Expecting value: line 1 column 1 (char 0)`. Measured cause: the 27B is a reasoning model, so on a 14 KB retain prompt it spends thousands of tokens thinking before emitting any content. At the previous 4096-token output allowance the reply arrived with `output` items of type `reasoning` only and an empty message (replayed: 4096 tokens out, 16,351 reasoning chars, 0 content chars), and because the fork does not report `incomplete_details.reason = max_output_tokens`, the provider never saw a truncation and passed the empty string to `json.loads`. With `HINDSIGHT_API_RETAIN_MAX_COMPLETION_TOKENS=16384` the same prompt returns reasoning plus 31,565 chars of parseable content. Run with the reasoning budget bounded and the completion allowance large enough for the thinking *and* the answer.
 - Selecting a mode also requires the live `config.json` `runtime.mode` to match. With `runtime.mode` still naming the previous mode, the systemd latch recreates that mode's stack next to the newly started one, so two profiles hold the GPU at once; repoint the live config before restarting the unit.
 
+- Retain extraction no longer spends its output allowance on thinking. The extraction scope
+  is the one scope where thinking is pure cost: Hindsight asks it for a bounded JSON answer,
+  and when the thinking budget ended the turn the reply could be content-less, which surfaced
+  as `JSON parse error ... Expecting value: line 1 column 1 (char 0)` and blocked the queue.
+  Setting `chat_template_kwargs.enable_thinking=false` through
+  `HINDSIGHT_API_RETAIN_LLM_EXTRA_BODY` is a Hindsight-side setting (the profile pins no
+  reasoning level) and was measured end-to-end: the same real retain payload returned valid
+  JSON in 41.7s instead of 94.1s, with no reasoning item and no empty-reply failures. JSON
+  parse, empty-reply and APIConnection errors all dropped to 0. Reasoning stays on for the
+  scopes that benefit (`reflect` at high effort).
+- Recorded the retain ceiling honestly: a single RTX 5090 emits ~38 tok/s for extraction
+  (~1.2 calls/minute at ~1,890 output tokens), the pending `retain` set is ~21k claimable
+  operations with payloads of 24-64 KB, and because an operation's token cost is fixed by its
+  payload, chunk/sub-batch sizing changes calls-per-operation but not operations-per-minute.
+  Claiming is a global FIFO on `created_at`, so completions run at ~2-4 per 30 minutes behind
+  the 2026-09-11 migration imports while normal coding-session ingestion arrives at ~15 per 30
+  minutes; the historical backlog therefore cannot drain on this hardware without a policy
+  decision (prune/quarantine the oversized imports, accept a below-arrival drain, reduce
+  extraction verbosity, or add extraction throughput). The pipeline itself is healthy:
+  `completed` resumes advancing and the extraction path is error-free.
+
 ### Upgrade notes
 
 - Build the mode before first start: `./run.sh --mode glm5.3-flash build` compiles the `llamaswap` and `freetoken` images; the first `warmup` downloads the ~160 GiB checkpoint into `cache/models`.
