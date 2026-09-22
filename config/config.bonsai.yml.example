@@ -65,6 +65,12 @@ models:
     concurrencyLimit: 16
     name: Ternary Bonsai 2 27B PQ2_0
     description: Primary thinking/tool-use model; ternary Bonsai 2 27B on the PrismML llama.cpp fork with native tool calls, co-resident with the GPU search models
+    # Slots kept at 6 to match this deployment's real concurrency: Hindsight caps
+    # LLM calls at 3 and runs 6 worker slots. With --kv-unified the 262144-token
+    # context is one shared pool, so surplus slots add no capacity and only put
+    # more sequences in competition for it. Measured 2026-09-22 with the Hindsight
+    # LLM cap at 3: per-stream prefill ~1.9-2.5K tok/s and decode ~57 tok/s, where
+    # ~9 admitted streams collapsed per-stream prefill to 62-176 tok/s.
     cmd: '${server_bin}
       server
       bonsai
@@ -77,7 +83,7 @@ models:
       --device CUDA0
       --fit off
       -c 262144
-      --parallel 12
+      --parallel 6
       --kv-unified
       --batch-size 2048
       --ubatch-size 512
