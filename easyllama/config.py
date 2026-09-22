@@ -49,6 +49,7 @@ class MODE(StrEnum):
     LLAMACPP = "llamacpp"
     TURBOQUANT = "turboquant"
     QWEN = "qwen"
+    BONSAI = "bonsai"
     SPIRITBUUN = "spiritbuun"
     LUCEBOX = "lucebox"
     GLM53FLASH = "glm5.3-flash"

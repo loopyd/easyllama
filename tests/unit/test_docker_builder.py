@@ -139,9 +139,7 @@ def test_proxy_config_has_explicit_container_contracts() -> None:
     assert "/opt/venv/bin/vllm serve" in chat_command
     assert "--language-model-only" in chat_command
     assert "LMCacheMPConnector" in chat_command
-    embeddings = next(
-        c for c in plan.containers if c.name.endswith("llamacpp-qwen3-embeddings")
-    )
+    embeddings = next(c for c in plan.containers if c.name.endswith("llamacpp-qwen3-embeddings"))
     assert embeddings.health_path == "/v1/models"
     assert embeddings.lifecycle_port == 9010
     assert "--host 0.0.0.0" in " ".join(embeddings.command)

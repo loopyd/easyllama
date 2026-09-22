@@ -62,7 +62,7 @@ reranking has two native slots. GPU chat and the co-resident search models occup
 mutually exclusive groups. Bound upstream bulk concurrency
 and use timeouts that cover model unloading, loading, queueing and generation.
 
-Choose a mode by backend behavior; the setup flow is the same for all six modes.
+Choose a mode by backend behavior; the setup flow is the same for all seven modes.
 
 - Mode-specific defaults live in the tracked templates under `config/`.
 
@@ -70,12 +70,17 @@ Choose a mode by backend behavior; the setup flow is the same for all six modes.
 | --- | --- | --- | --- | --- |
 | `llamacpp` | Plain llama.cpp path | `easyllama server llamacpp` | `unsloth/Qwen3.6-27B-GGUF:Q4_K_M` | none |
 | `turboquant` | Turboquant KV-cache experiments | `easyllama server turboquant` | `unsloth/Qwen3.6-27B-GGUF:UD-Q5_K_XL` | none |
+| `bonsai` | Ternary Bonsai 2 27B co-resident with GPU embeddings and reranking on one RTX 5090 | `easyllama server bonsai` | `prism-ml/Ternary-Bonsai-2-27B-gguf:Ternary-Bonsai-2-27B-PQ2_0.gguf` | `POST /v1/rerank` |
 | `qwen` | Qwen3.8 RVN Heretic at its native 262K context on one RTX 5090 | `easyllama server qwen` | `0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF:RVN-Q4_K_M-multilingual-mtp.gguf` | `POST /v1/rerank` |
 | `spiritbuun` | buun-llama-cpp DFlash experiments | `easyllama server spiritbuun` | `unsloth/Qwen3.6-27B-GGUF:Q5_K_M` + `Ardenzard/Qwen3.6-27B-DFlash-GGUF:Qwen3.6-27B-DFlash-Q5_K_M.gguf` | none |
 | `lucebox` | Luce dflash/pflash experiments | `easyllama server lucebox` | `unsloth/Qwen3.6-27B-GGUF:Q4_K_M` + `KingsonHO/Qwen3.6-27B-DFlash:model.safetensors` | `POST /v1/messages` |
 | `glm5.3-flash` | GLM-5.3 Flash 320B MoE (18B active) on the FreeToken runtime | `easyllama server glm5.3-flash` | `RedHatAI/GLM-5.3-Flash-NVFP4` (NVFP4 HF checkpoint, FreeToken offload) | `POST /v1/messages` |
 
 The `glm5.3-flash` mode runs the FreeToken runtime, not llama.cpp: FreeToken is installed from the pinned `FlashML-org/FreeToken` repository into an isolated venv (`/opt/ft-venv`) inside the dedicated `freetoken` image role, and the runtime stage merges the CUDA 13 compiler (nvcc) because FreeToken JIT-compiles its kernels on first use. GLM-5.3 Flash is a 320B-total / 18B-active MoE with hybrid linear (KDA) plus sparse (DSA) attention; only the eleven DSA layers grow KV, so the full 262,144-token context costs about 2.8 GiB of KV (bf16) and the profile pins it at `--max-seq-len-override`, `--num-tokens` and `--kv-reserve-tokens`. NVFP4 routed experts live off-VRAM: FreeToken keeps an LRU expert cache in host RAM and streams misses from the checkpoint on the host SSD (`cache/models`, ~160 GiB download on first start). The mode exposes `glm53-chat` and the 30-minute idle timer keeps the model warm.
+
+The `bonsai` mode serves Ternary Bonsai 2 27B (`prism-ml/Ternary-Bonsai-2-27B-gguf`, `PQ2_0`, ~7.2 GB, 1.72 bits per weight, derived from Qwen3.8-27B) on the pinned `PrismML-Eng/llama.cpp` `prism` build, shipped as `/app/bin/llama-server-bonsai`. That fork is required: the ternary g128 kernels live there, and a stock llama.cpp build rejects the `PQ2_0` tensor type outright. The mode is built for co-residency instead of swapping. The chat model, the Qwen3-Embedding-0.6B embedder and the BGE reranker stay GPU-resident at the same time in one non-swapping group (`swap: false`, `exclusive: false`), so no member can evict another and llama-swap remains the only lifecycle owner. Chat serves `bonsai-chat` at the model's full 262,144-token context, shared unified across two slots with q8_0 KV, and keeps reasoning on: it uses the Qwen3.8 template (`/chat_template/qwen3.8.jinja`) so reasoning levels (`low`/`medium`/`xhigh`) are honoured per request, with `--reasoning-preserve` to keep the thinking trace in history and `--reasoning-format deepseek` to keep it out of `content`. Because an unset level defaults to `xhigh`, a server-wide `--reasoning-budget` bounds the thinking; without that bound a long retain prompt can spend the entire output allowance thinking and emit no content at all, which is what made Hindsight's extraction unserialisable. The embedder keeps the `qwen3-embeddings` identity at 1,024 dimensions, and `qwen3-reranker` serves `POST /v1/rerank` on two native slots. Measured on an RTX 5090: the three-model steady state at full context holds ~22.9 GiB of the 32,607 MiB card (about 9.1 GiB free) and decodes at 126-134 tok/s on short prompts.
+
+Co-residency is the reason the mode exists. A Hindsight retain needs the chat model and the embedder in the same window, and the qwen profile's mutually exclusive swap groups made that impossible: measured over a 40-minute window, `/v1/embeddings` succeeded zero times and the retain queue completed 0-1 operations per 30 minutes against a backlog of ~28k. With one GPU-resident group, both are resident, so the queue drains. `config/config.bonsai.yml.example` documents the group, the port band (`startPort: 9600`) and the pinned model artifacts.
 
 The `qwen` mode uses llama.cpp for chat and embeddings. Chat runs the multilingual RVN Heretic Q4_K_M model text-only at 262,144 tokens with full GPU placement, Q8_0 KV, Flash Attention, native RAM-backed prompt caching, and its embedded MTP head at draft depth two. vLLM, LMCache, and chat CPU weight offload are disabled. The Qwen3.8 template preserves reasoning and accepts `low`, `medium`, and `xhigh` reasoning effort (`high` aliases `xhigh`); clients with additional level names must map them first. This profile sets llama-swap's global idle timer to 30 minutes; other profiles retain the disabled default.
 
@@ -122,7 +127,7 @@ traffic or rebuilding vector indexes. See [API details](API.md#endpoint-matrix).
 - `docker buildx`
 - NVIDIA drivers and working `nvidia-smi`
 - NVIDIA container runtime in Docker
-- 32 GiB NVIDIA GPU for the Qwen profile's full 262K context
+- 32 GiB NVIDIA GPU for the Qwen profile's full 262K context, or for the Bonsai profile's co-resident chat, embeddings and reranking
 - Python `3.11+`
 - `curl`
 - `jq`
@@ -168,6 +173,7 @@ Set:
 cp config/config.llamacpp.yml.example config/config.llamacpp.yml
 cp config/config.turboquant.yml.example config/config.turboquant.yml
 cp config/config.spiritbuun.yml.example config/config.spiritbuun.yml
+cp config/config.bonsai.yml.example config/config.bonsai.yml
 cp config/config.qwen.yml.example config/config.qwen.yml
 cp config/config.lucebox.yml.example config/config.lucebox.yml
 ```
@@ -248,11 +254,13 @@ with `--wipe-cache [list]` when a cache is corrupt or you want a cold-cache test
 | `config.json.example` | Complete tracked configuration template |
 | `config/config.llamacpp.yml` | Editable config for `llamacpp` |
 | `config/config.turboquant.yml` | Editable config for `turboquant` |
+| `config/config.bonsai.yml` | Editable config for `bonsai` |
 | `config/config.spiritbuun.yml` | Editable config for `spiritbuun` |
 | `config/config.qwen.yml` | Editable config for `qwen` |
 | `config/config.lucebox.yml` | Editable config for `lucebox` |
 | `config/config.llamacpp.yml.example` | Tracked `llamacpp` template |
 | `config/config.turboquant.yml.example` | Tracked `turboquant` template |
+| `config/config.bonsai.yml.example` | Tracked `bonsai` template |
 | `config/config.spiritbuun.yml.example` | Tracked `spiritbuun` template |
 | `config/config.qwen.yml.example` | Tracked `qwen` template |
 | `config/config.lucebox.yml.example` | Tracked `lucebox` template |

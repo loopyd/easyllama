@@ -459,9 +459,8 @@ def serve_lifecycle(host: str, port: int, command: list[str]) -> int:
     http_base = (
         os.environ.get("EASYLLAMA_HTTP_BASE", "").strip() or _api_base_from_command(command) or None
     )
-    slot_cache_dir = (
-        os.environ.get("EASYLLAMA_SLOT_CACHE_DIR", "").strip()
-        or _flag_value(command, "--slot-save-path")
+    slot_cache_dir = os.environ.get("EASYLLAMA_SLOT_CACHE_DIR", "").strip() or _flag_value(
+        command, "--slot-save-path"
     )
     if sleep_mode in ("slot", "http") and not http_base:
         raise SystemExit(f"EASYLLAMA_SLEEP_MODE={sleep_mode} requires EASYLLAMA_HTTP_BASE")

@@ -1,0 +1,148 @@
+# Bonsai mode: all three models GPU-resident at the same time.
+#
+# Ternary Bonsai 2 27B (PQ2_0) is ~7.2 GB of weights on a card with 32,607 MiB,
+# and its hybrid attention (~75% linear layers) keeps the KV cache small, so the
+# chat model, the 0.6B embedder and the compact reranker all fit on the GPU at
+# once with the chat model at its full 262,144-token context. That co-residency is
+# the point of the mode: a Hindsight retain needs the
+# LLM and the embeddings at the same time, and the qwen profile's mutually
+# exclusive swap groups made that impossible (measured: /v1/embeddings succeeded
+# 0 times in a 40-minute window, 0-1 retain completions per 30 minutes against a
+# 28k backlog).
+#
+# Declaring one non-swapping group is deliberate. The compiler reads
+# `routing.router.settings.groups.gpu.members` unconditionally, so the `gpu`
+# key must exist, but `swap: false` means the members never evict each other and
+# `exclusive: false` means no other model is locked out. Nothing here swaps.
+startPort: 9600
+# A start that cannot become healthy fails observably instead of hanging.
+# Ternary Bonsai 2 27B is loaded from the host SSD with --no-mmap, so the first
+# start of the chat model pays the full read; 300s leaves room for that on a
+# contended host.
+healthCheckTimeout: 300
+# Idle models unload after this and reload on demand. Long enough that a busy
+# Hindsight queue keeps all three hot without any swap-in cost.
+globalTTL: 1800
+routing:
+  router:
+    use: group
+    settings:
+      groups:
+        gpu:
+          swap: false
+          exclusive: false
+          members:
+          - bonsai-chat
+          - qwen3-embeddings
+          - qwen3-reranker
+macros:
+  # Portable Hugging Face resolution: repo:file. The PrismML fork's ternary
+  # kernels are required - a stock llama.cpp build rejects PQ2_0 outright.
+  bonsai_chat_hf: prism-ml/Ternary-Bonsai-2-27B-gguf:Ternary-Bonsai-2-27B-PQ2_0.gguf
+  # Already-cached auxiliary weights, pinned to the snapshot the deployment uses.
+  embedding_model: /root/.cache/huggingface/hub/models--Qwen--Qwen3-Embedding-0.6B-GGUF/snapshots/370f27d7550e0def9b39c1f16d3fbaa13aa67728/Qwen3-Embedding-0.6B-f16.gguf
+  reranker_model: /root/.cache/huggingface/hub/models--gpustack--bge-reranker-v2-m3-GGUF/snapshots/3093af03b1a635e67b084b1d8c03c5f5e020fd05/bge-reranker-v2-m3-Q8_0.gguf
+models:
+  # port/lifecyclePort are pinned so adding or removing a model never shifts an
+  # address. Two ports are reserved per model (API port and a backend slot at
+  # +1), and the lifecycle listeners follow that band.
+  # Context is at the model's full 262,144-token window with q8_0 KV so the
+  # three-model co-residency still fits the 32 GiB card: long Hindsight retain
+  # calls need room for the prompt, the thinking and a verbose extraction answer.
+  # Reasoning stays ON through the Qwen3.8 template, so reasoning levels
+  # (low/medium/xhigh) are honoured per request. The profile deliberately pins no
+  # level and no thinking budget: the level is the caller's decision, set from the
+  # Hindsight side per scope through HINDSIGHT_API_*_LLM_EXTRA_BODY (for example
+  # retain at `low` for bulk extraction and reflect at `high` for synthesis).
+  # Whatever the level, the caller's output allowance must cover the thinking plus
+  # the answer, because this fork does not report max_output_tokens truncation and
+  # a reply whose whole allowance went to thinking arrives with no content at all.
+  bonsai-chat:
+    port: 9600
+    lifecyclePort: 9608
+    # 0 disables llama-swap's early admission rejection so a request waits
+    # through a model switch instead of returning 429.
+    concurrencyLimit: 0
+    name: Ternary Bonsai 2 27B PQ2_0
+    description: Primary thinking/tool-use model; ternary Bonsai 2 27B on the PrismML llama.cpp fork with native tool calls, co-resident with the GPU search models
+    cmd: '${server_bin}
+      server
+      bonsai
+      --bin /app/bin/llama-server-bonsai
+      --host 0.0.0.0
+      --port ${PORT}
+      -hf ${bonsai_chat_hf}
+      --alias bonsai-chat
+      -ngl all
+      --device CUDA0
+      --fit off
+      -c 262144
+      --parallel 4
+      --kv-unified
+      --batch-size 2048
+      --ubatch-size 512
+      -fa on
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+      --temp 0.5
+      --top-k 20
+      --top-p 0.85
+      --min-p 0.0
+      --jinja
+      --chat-template-file /chat_template/qwen3.8.jinja
+      --reasoning-preserve
+      --reasoning-budget 4096
+      --reasoning-format deepseek
+      --no-mmap
+      --no-warmup
+      --no-webui
+      '
+    cmdStop: /bin/kill -TERM ${PID}
+  # The embedding identity stays Qwen3-Embedding-0.6B at 1024 dimensions: the
+  # vchord index and every stored vector were built with it.
+  qwen3-embeddings:
+    port: 9604
+    lifecyclePort: 9610
+    concurrencyLimit: 0
+    name: Qwen3 Embeddings 0.6B FP16
+    description: Dense embedding model for vector search, RAG, similarity
+    cmd: '${server_bin}
+      server
+      bonsai
+      --bin /app/bin/llama-server-bonsai
+      --host 0.0.0.0
+      --port ${PORT}
+      --model ${embedding_model}
+      --n-gpu-layers all
+      --device CUDA0
+      --fit off
+      --threads 4
+      --threads-batch 4
+      --ctx-size 32768
+      --batch-size 512
+      --ubatch-size 512
+      --parallel 4
+      --flash-attn on
+      --cache-type-k f16
+      --cache-type-v f16
+      --no-mmap
+      --no-warmup
+      --embedding
+      --pooling last
+      '
+    cmdStop: /bin/kill -TERM ${PID}
+  qwen3-reranker:
+    port: 9606
+    lifecyclePort: 9611
+    concurrencyLimit: 0
+    name: BGE Reranker v2 M3 Q8_0
+    description: Compact GPU cross-encoder co-resident with the chat model and embeddings
+    cmd: '${server_bin}
+      server bonsai --bin /app/bin/llama-server-bonsai
+      --host 0.0.0.0 --port ${PORT}
+      --model ${reranker_model}
+      --n-gpu-layers all --device CUDA0 --fit off --threads 2 --threads-batch 2
+      --ctx-size 16384 --batch-size 8192 --ubatch-size 8192 --parallel 2
+      --embedding --pooling rank --reranking --no-warmup --no-webui
+      '
+    cmdStop: /bin/kill -TERM ${PID}

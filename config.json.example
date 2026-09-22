@@ -93,6 +93,16 @@
         "llamacpp"
       ]
     },
+    "bonsai": {
+      "repo": {
+        "url": "https://github.com/PrismML-Eng/llama.cpp.git",
+        "ref": "prism-b10709-9a9394a"
+      },
+      "services": [
+        "llamaswap",
+        "llamacpp"
+      ]
+    },
     "turboquant": {
       "repo": {
         "url": "https://github.com/TheTom/llama-cpp-turboquant.git",

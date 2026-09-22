@@ -176,7 +176,11 @@ def _runtime(monkeypatch: pytest.MonkeyPatch, items: list[FakeContainer]) -> tup
 
     client = FakeClient(items)
     monkeypatch.setattr(docker_module, "from_env", lambda: client)
-    runtime = docker_module.DockerRuntime(Config.load())
+    # Pin the mode instead of inheriting the live `config.json` `runtime.mode`:
+    # the sweep is scoped to the selected mode (mode_containers filters on
+    # `easyllama.mode`), so a developer machine whose live config selects another
+    # mode would otherwise change what this suite asserts.
+    runtime = docker_module.DockerRuntime(Config.load(mode_override="qwen"))
     # A deterministic configured credential: the host environment must not be able
     # to blank it out through contract ${HF_TOKEN} expansion.
     runtime.settings = runtime.settings.model_copy(
