@@ -62,7 +62,7 @@ models:
     lifecyclePort: 9608
     # 0 disables llama-swap's early admission rejection so a request waits
     # through a model switch instead of returning 429.
-    concurrencyLimit: 0
+    concurrencyLimit: 16
     name: Ternary Bonsai 2 27B PQ2_0
     description: Primary thinking/tool-use model; ternary Bonsai 2 27B on the PrismML llama.cpp fork with native tool calls, co-resident with the GPU search models
     cmd: '${server_bin}
@@ -103,7 +103,7 @@ models:
   qwen3-embeddings:
     port: 9604
     lifecyclePort: 9610
-    concurrencyLimit: 0
+    concurrencyLimit: 16
     name: Qwen3 Embeddings 0.6B FP16
     description: Dense embedding model for vector search, RAG, similarity
     cmd: '${server_bin}
@@ -134,7 +134,7 @@ models:
   qwen3-reranker:
     port: 9606
     lifecyclePort: 9611
-    concurrencyLimit: 0
+    concurrencyLimit: 16
     name: BGE Reranker v2 M3 Q8_0
     description: Compact GPU cross-encoder co-resident with the chat model and embeddings
     cmd: '${server_bin}

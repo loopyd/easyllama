@@ -47,6 +47,14 @@ Format follows Keep a Changelog style where possible, based on published release
   extraction verbosity, or add extraction throughput). The pipeline itself is healthy:
   `completed` resumes advancing and the extraction path is error-free.
 
+- `bonsai` mode raises the llama-swap admission limit explicitly (`concurrencyLimit: 16`).
+  The profile previously used llama-swap's `0` sentinel, which the repo documents as disabling
+  early admission rejection, but this deployment measured the proxy rejecting concurrent
+  requests with HTTP 429 `code=concurrency_limit` once more than two were in flight, while the
+  backend accepted six or more against its twelve slots. With an explicit limit, eight
+  concurrent requests all returned 200 and zero 429s. That cap, not the GPU, was holding
+  retain extraction to ~1-2 calls/minute.
+
 ### Upgrade notes
 
 - Build the mode before first start: `./run.sh --mode glm5.3-flash build` compiles the `llamaswap` and `freetoken` images; the first `warmup` downloads the ~160 GiB checkpoint into `cache/models`.
