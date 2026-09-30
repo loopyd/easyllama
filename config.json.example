@@ -96,7 +96,7 @@
     "bonsai": {
       "repo": {
         "url": "https://github.com/PrismML-Eng/llama.cpp.git",
-        "ref": "prism-b10709-9a9394a"
+        "ref": "88c4bc60b9c9578f134385be9535e853f2db9b9f"
       },
       "services": [
         "llamaswap",

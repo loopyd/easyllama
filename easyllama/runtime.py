@@ -160,7 +160,7 @@ def _model_file_refs(command: str) -> list[str]:
 
     Returns:
         list[str]: The model file refs result."""
-    return re.findall(r"(?:^|\s)--model\s+(\S+)", command)
+    return re.findall(r"(?:^|\s)(?:--model|--model-draft|--spec-draft-model|-md)\s+(\S+)", command)
 
 
 def _hub_cache_ref(path: str) -> tuple[str, str, str] | None:

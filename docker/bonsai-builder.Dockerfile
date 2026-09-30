@@ -1,13 +1,16 @@
 FROM builder-base AS bonsai-builder
 ARG BUILD_MODE=llamacpp
 ARG LLAMA_CPP_REPO=https://github.com/PrismML-Eng/llama.cpp.git
-ARG LLAMA_CPP_REF=prism-b10709-9a9394a
+ARG LLAMA_CPP_REF=88c4bc60b9c9578f134385be9535e853f2db9b9f
 ARG CMAKE_CUDA_ARCHITECTURES=120
 ARG BUILD_JOBS=1
 RUN --mount=type=cache,id=llamacpp-ccache,target=/root/.cache/ccache,sharing=locked \
     if [ "${BUILD_MODE}" = "bonsai" ]; then \
-        git clone --depth 1 --branch "${LLAMA_CPP_REF}" "${LLAMA_CPP_REPO}" /src/llama.cpp-bonsai \
+        git init /src/llama.cpp-bonsai \
         && cd /src/llama.cpp-bonsai \
+        && git remote add origin "${LLAMA_CPP_REPO}" \
+        && git fetch --depth 1 origin "${LLAMA_CPP_REF}" \
+        && git checkout --detach FETCH_HEAD \
         && cmake -B build \
         -DGGML_CUDA=ON \
         -DCMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES}" \

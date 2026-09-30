@@ -188,3 +188,36 @@ def test_hub_cache_ref_decoding() -> None:
     assert runtime_module._hub_cache_ref("/models/cached.gguf") is None
     assert runtime_module._hub_cache_ref("/models--owner--repo/blob/abc.gguf") is None
     assert runtime_module._hub_cache_ref("/models--/snapshots/abc/noowner.gguf") is None
+
+
+@pytest.mark.parametrize("flag", ["--model-draft", "--spec-draft-model", "-md"])
+def test_prefetch_downloads_pinned_drafter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag: str
+) -> None:
+    settings, models_dir = _settings(tmp_path)
+    drafter = (
+        "/root/.cache/huggingface/hub/models--ProCreations--Ternary-Bonsai-2-27B-DFlash2"
+        "/snapshots/4cfb6ad03268fed0f60ca96c1a659c0b1c77e50b"
+        "/Bonsai-2-27B-DFlash2-Q8_0.gguf"
+    )
+    config = yaml.safe_load(settings.resolve_ls_config().read_text())
+    config["models"]["local-model"]["cmd"] += f" {flag} {drafter}"
+    settings.resolve_ls_config().write_text(yaml.safe_dump(config))
+    FakeHf.gets.clear()
+    FakeHf.snapshots.clear()
+    monkeypatch.setattr(runtime_module, "HuggingFace", FakeHf)
+
+    runtime_module._prefetch_models(cast(Any, settings), ["local-model"])
+
+    assert FakeHf.snapshots == []
+    assert FakeHf.gets == [
+        (
+            "local-model",
+            "Bonsai-2-27B-DFlash2-Q8_0.gguf",
+            {
+                "cache_dir": models_dir,
+                "warmup": "Warming model 1/1: local-model",
+                "revision": "4cfb6ad03268fed0f60ca96c1a659c0b1c77e50b",
+            },
+        )
+    ]

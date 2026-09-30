@@ -1,9 +1,7 @@
-# DFlash2 at four slots is the selected default. Six-slot mixed traffic passed
-# with 171 MiB free; four slots passed with about 2.7 GiB free after mixed traffic.
-# Keep the plain profile for prose and the three-slot variant for more headroom.
+# Plain PQ2_0 rollback profile. Select with EASYLLAMA_LS_CONFIG_FILE.
 # Bonsai mode: all three models GPU-resident at the same time.
 #
-# Ternary Bonsai 2 27B (PTQ1_0) is ~5.9 GB of weights on a card with 32,607 MiB,
+# Ternary Bonsai 2 27B (PQ2_0) is ~7.2 GB of weights on a card with 32,607 MiB,
 # and its hybrid attention (~75% linear layers) keeps the KV cache small, so the
 # chat model, the 0.6B embedder and the compact reranker all fit on the GPU at
 # once with the chat model at its full 262,144-token context. That co-residency is
@@ -39,11 +37,9 @@ routing:
           - qwen3-embeddings
           - qwen3-reranker
 macros:
-  # Snapshot-pinned target and drafter. Host warmup downloads both files.
-  # The PrismML fork is required for the PTQ1_0 ternary kernels.
-  bonsai_target: /root/.cache/huggingface/hub/models--prism-ml--Ternary-Bonsai-2-27B-gguf/snapshots/b072e1d3b35a0a630cece372c2127528e0994386/Ternary-Bonsai-2-27B-PTQ1_0.gguf
-  bonsai_drafter: /root/.cache/huggingface/hub/models--ProCreations--Ternary-Bonsai-2-27B-DFlash2/snapshots/4cfb6ad03268fed0f60ca96c1a659c0b1c77e50b/Bonsai-2-27B-DFlash2-Q8_0.gguf
-  bonsai_spec_type: draft-dflash
+  # Portable Hugging Face resolution: repo:file. The PrismML fork's ternary
+  # kernels are required - a stock llama.cpp build rejects PQ2_0 outright.
+  bonsai_chat_hf: prism-ml/Ternary-Bonsai-2-27B-gguf:Ternary-Bonsai-2-27B-PQ2_0.gguf
   # Already-cached auxiliary weights, pinned to the snapshot the deployment uses.
   embedding_model: /root/.cache/huggingface/hub/models--Qwen--Qwen3-Embedding-0.6B-GGUF/snapshots/370f27d7550e0def9b39c1f16d3fbaa13aa67728/Qwen3-Embedding-0.6B-f16.gguf
   reranker_model: /root/.cache/huggingface/hub/models--gpustack--bge-reranker-v2-m3-GGUF/snapshots/3093af03b1a635e67b084b1d8c03c5f5e020fd05/bge-reranker-v2-m3-Q8_0.gguf
@@ -68,27 +64,27 @@ models:
     # 0 disables llama-swap's early admission rejection so a request waits
     # through a model switch instead of returning 429.
     concurrencyLimit: 16
-    name: Ternary Bonsai 2 27B PTQ1_0 DFlash2 Q8_0
-    description: Primary thinking/tool-use model; PTQ1_0 Bonsai 2 27B with Q8_0 DFlash2 at depth seven on the PrismML fork, co-resident with the GPU search models
-    # Four slots share one 262144-token context pool through --kv-unified.
-    # The drafter and the GPU search models remain co-resident.
+    name: Ternary Bonsai 2 27B PQ2_0
+    description: Primary thinking/tool-use model; ternary Bonsai 2 27B on the PrismML llama.cpp fork with native tool calls, co-resident with the GPU search models
+    # Slots kept at 6 to match this deployment's real concurrency: Hindsight caps
+    # LLM calls at 3 and runs 6 worker slots. With --kv-unified the 262144-token
+    # context is one shared pool, so surplus slots add no capacity and only put
+    # more sequences in competition for it. Measured 2026-09-22 with the Hindsight
+    # LLM cap at 3: per-stream prefill ~1.9-2.5K tok/s and decode ~57 tok/s, where
+    # ~9 admitted streams collapsed per-stream prefill to 62-176 tok/s.
     cmd: '${server_bin}
       server
       bonsai
       --bin /app/bin/llama-server-bonsai
       --host 0.0.0.0
       --port ${PORT}
-      --model ${bonsai_target}
-      --model-draft ${bonsai_drafter}
-      --gpu-layers-draft all
-      --spec-type ${bonsai_spec_type}
-      --spec-draft-n-max 7
+      -hf ${bonsai_chat_hf}
       --alias bonsai-chat
       -ngl all
       --device CUDA0
       --fit off
       -c 262144
-      --parallel 4
+      --parallel 6
       --kv-unified
       --batch-size 2048
       --ubatch-size 512
