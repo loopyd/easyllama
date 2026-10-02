@@ -9,15 +9,17 @@ Format follows Keep a Changelog style where possible, based on published release
 
 ### Added
 
-- `bonsai` mode serving Ternary Bonsai 2 27B (`prism-ml/Ternary-Bonsai-2-27B-gguf`, `PQ2_0`, ~7.2 GB at 1.72 bits/weight, derived from Qwen3.8-27B) on a pinned `PrismML-Eng/llama.cpp` `prism` build (tag `prism-b10709-9a9394a`), shipped as `/app/bin/llama-server-bonsai` by a new `bonsai-builder` stage and `runtime-llamacpp-bonsai` runtime stage. The fork is required, not a preference: a stock llama.cpp build rejects the ternary `PQ2_0` tensor type, and a plain `Q2_0` file loads silently and emits garbage.
-- The mode is built for co-residency instead of swapping. `bonsai-chat`, `qwen3-embeddings` and `qwen3-reranker` are all GPU-resident in one non-swapping group (`swap: false`, `exclusive: false`) with pinned ports in their own `startPort: 9600` band, so no member evicts another and llama-swap remains the only lifecycle owner. Measured on a 32,607 MiB RTX 5090, the three-model steady state holds ~22.9 GiB with ~9.1 GiB free.
-- `bonsai-chat` runs the model's full 262,144-token context, shared unified across two slots with q8_0 KV, and keeps reasoning on through the Qwen3.8 template (`/chat_template/qwen3.8.jinja`) so reasoning levels (`low`/`medium`/`xhigh`) are honoured per request, with `--reasoning-preserve` and `--reasoning-format deepseek`. A server-wide `--reasoning-budget` bounds the thinking, because an unset level defaults to `xhigh` and an unbounded trace can consume the whole output allowance before any content is emitted.
+- `bonsai` mode serves Ternary Bonsai 2 27B PTQ1_0, about 5.9 GB of weights, with a snapshot-pinned ProCreations Q8_0 DFlash2 drafter at depth seven. Its Prism build is pinned to `88c4bc60b9c9578f134385be9535e853f2db9b9f`, including DFlash2 and the September 29 CUDA integration checkpoint. The `bonsai-builder` and `runtime-llamacpp-bonsai` stages ship `/app/bin/llama-server-bonsai` with SM120 CUDA code.
+- Chat, its drafter, Qwen3-Embedding-0.6B, and BGE reranker v2 M3 Q8_0 share the GPU in one non-swapping group. The API routes retain `bonsai-chat`, `qwen3-embeddings`, and `qwen3-reranker` in the `startPort: 9600` band. The embedder keeps 1,024 dimensions and shares its 32,768-token pool across four native slots with `--kv-unified`.
+- `bonsai-chat` provides the model's full 262,144-token window through one queued chat slot, Q8 K/V, and Flash Attention. The window includes prompt and generated output. Reasoning stays enabled through `/chat_template/qwen3.8.jinja`, with per-request effort, preserved thinking, separate reasoning content, and a 1,024-token server thinking budget.
 - `glm5.3-flash` mode serving GLM-5.3 Flash (320B total / 18B active MoE, hybrid KDA/DSA attention) on the FreeToken runtime. FreeToken is a first-class `freetoken` image role: it is installed from the pinned `FlashML-org/FreeToken` repository into an isolated venv (`/opt/ft-venv`) in the `freetoken-builder` stage and shipped by the `runtime-freetoken` stage, which also merges the CUDA 13 compiler (nvcc) for FreeToken's JIT-compiled kernels. The mode is not derived from the llama.cpp runtime chain.
 - The mode exposes `glm53-chat` backed by the `RedHatAI/GLM-5.3-Flash-NVFP4` checkpoint (NVFP4, FreeToken known-good), cached under `cache/models` on the host SSD. NVFP4 routed experts run off-VRAM through FreeToken MoE offload (host RAM LRU expert cache with NVMe-backed streaming), and the profile pins the full 262,144-token context (about 2.8 GiB of KV) via `--max-seq-len-override`, `--num-tokens` and `--kv-reserve-tokens`.
 - FreeToken-native API surface for the mode: `POST /v1/messages`, `POST /v1/responses`, and `GET /v1/stats` alongside the OpenAI-compatible chat routes.
 
 ### Changed
 
+- Bonsai chat now executes admitted requests serially with `--parallel 1` and `--kv-unified`; the explicit `concurrencyLimit: 16` bounds outstanding admissions. Earlier multiple-slot trials could exhaust the shared KV pool below per-request context limits. GPU embeddings and reranking remain concurrent. The default, experimental, and plain PQ2_0 rollback templates all preserve the full model window and one chat slot.
+- The experimental DFlash2 template exposes `bonsai_spec_depth_max` and `bonsai_kv_type`. Its defaults remain cutoff `0` and Q8 K/V after the RTX 5090 trials: at 64K, unlimited Q8 speculation averaged 195.2, 192.4, and 102.0 tok/s for code, math, and prose, while the 24K, 32K, and 48K cutoffs reduced rates to about 91-92 tok/s. Both cache types passed a 261,888-token retrieval request; Q8 left 6,773 MiB free and Q4 left 10,778 MiB free. All 154 inference requests completed with no recorded CUDA failures. See [Bonsai profiles](README.md#bonsai-profiles) for methods and limits; sustained decode beyond 64K and broad cache-quality equivalence remain unmeasured.
 - `clean` no longer wipes host caches by default. Pass `--wipe-cache [root,pkg,python,models]` (empty for all) to opt in. Repeated wipes during debugging force re-downloads (model weights, package archives) and delay the next start or image build.
 - Qwen mode no longer co-resides the auxiliary models with the chat backend. Co-residency was reverted as physically infeasible at the pinned 128K chat context on a 32 GiB GPU (measured: about 48 MiB free with only chat and embeddings resident, so a further worker could never start). llama-swap is the sole lifecycle owner: chat and the search group are mutually exclusive, the auxiliary models swap in on demand and unload when a large chat request needs the GPU, and `--gpu-memory-utilization` is 0.85 so the swap-in has room.
 
@@ -51,9 +53,11 @@ Format follows Keep a Changelog style where possible, based on published release
   The profile previously used llama-swap's `0` sentinel, which the repo documents as disabling
   early admission rejection, but this deployment measured the proxy rejecting concurrent
   requests with HTTP 429 `code=concurrency_limit` once more than two were in flight, while the
-  backend accepted six or more against its twelve slots. With an explicit limit, eight
-  concurrent requests all returned 200 and zero 429s. That cap, not the GPU, was holding
-  retain extraction to ~1-2 calls/minute.
+  backend in that earlier trial accepted six or more against its twelve slots. With an
+  explicit limit, eight concurrent requests all returned 200 and zero 429s. That cap,
+  not the GPU, was holding retain extraction to ~1-2 calls/minute at the time. The current
+  profile retains the explicit admission limit but queues chat through one native slot
+  to preserve the full per-request context window.
 
 ### Upgrade notes
 

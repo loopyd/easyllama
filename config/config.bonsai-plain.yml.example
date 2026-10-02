@@ -1,4 +1,6 @@
 # Plain PQ2_0 rollback profile. Select with EASYLLAMA_LS_CONFIG_FILE.
+# One queued chat slot preserves the full 262144-token model window.
+# The window includes the prompt, thinking, and answer. Q8 K/V stays enabled.
 # Bonsai mode: all three models GPU-resident at the same time.
 #
 # Ternary Bonsai 2 27B (PQ2_0) is ~7.2 GB of weights on a card with 32,607 MiB,
@@ -61,17 +63,13 @@ models:
   bonsai-chat:
     port: 9600
     lifecyclePort: 9608
-    # 0 disables llama-swap's early admission rejection so a request waits
-    # through a model switch instead of returning 429.
+    # Admit up to 16 outstanding chat requests; excess requests get HTTP 429.
+    # llama.cpp executes admitted requests serially behind its one chat slot.
     concurrencyLimit: 16
     name: Ternary Bonsai 2 27B PQ2_0
     description: Primary thinking/tool-use model; ternary Bonsai 2 27B on the PrismML llama.cpp fork with native tool calls, co-resident with the GPU search models
-    # Slots kept at 6 to match this deployment's real concurrency: Hindsight caps
-    # LLM calls at 3 and runs 6 worker slots. With --kv-unified the 262144-token
-    # context is one shared pool, so surplus slots add no capacity and only put
-    # more sequences in competition for it. Measured 2026-09-22 with the Hindsight
-    # LLM cap at 3: per-stream prefill ~1.9-2.5K tok/s and decode ~57 tok/s, where
-    # ~9 admitted streams collapsed per-stream prefill to 62-176 tok/s.
+    # One slot owns the full 262144-token KV pool. Admitted chat requests wait
+    # instead of competing for capacity; GPU search routes remain concurrent.
     cmd: '${server_bin}
       server
       bonsai
@@ -84,7 +82,7 @@ models:
       --device CUDA0
       --fit off
       -c 262144
-      --parallel 6
+      --parallel 1
       --kv-unified
       --batch-size 2048
       --ubatch-size 512

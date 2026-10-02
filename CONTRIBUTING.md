@@ -20,7 +20,8 @@ Thanks for helping keep the project usable and easy to maintain.
 - Update `config.json.example` and its nested Pydantic category when project configuration changes.
 - Update the matching `config/config.<mode>.yml.example` when llama-swap models or command defaults change.
 - Describe shipped behavior, not ignored local `config.json` or `config/config.<mode>.yml` overrides.
-- Keep the five supported modes and their backends consistent across docs, config, and runtime metadata.
+- Keep the seven supported modes and their backends consistent across docs, config, and runtime metadata.
+- For Bonsai profile changes, keep the full 262,144-token model window, one queued chat slot, search-model co-residency, and the source pins consistent across the README, API guide, and profile templates. Label timing depth separately from the configured context, and state the limits of fit, throughput, and quality evidence.
 
 ## Validation
 
@@ -46,4 +47,3 @@ For runtime-facing changes, clean the selected managed stack and cache, rebuild 
 ```
 
 At minimum, verify `GET /health` and `GET /v1/models`. If API behavior changes, update `API.md` and exercise the affected request examples.
-

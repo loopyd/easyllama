@@ -29,9 +29,18 @@ Tune the first llama.cpp-backed chat alias in a chosen easyllama mode until the 
 - Treat `config/config.<mode>.yml` as the active scratchpad; its path is derived from the mode unless top-level `llama_swap_override` is set. Do not sync the example until a setting passes.
 - Before a tuning probe, stop the selected managed mode stack and network through `./run.sh --mode <mode> stop`; do not stop unrelated containers by name prefix.
 - Use the real `./run.sh --mode <mode> restart && ./run.sh --mode <mode> warmup <chat-alias>` path as the acceptance check.
-- When lowering KV cache precision, prefer `q5_1` before `q5_0`.
+- For profiles other than Bonsai, prefer `q5_1` before `q5_0` when lowering KV cache precision. Follow the Bonsai constraints below for its measured Q8/Q4 Flash Attention path.
 - Do not assume `q6_*` KV modes exist; check the runtime surface first.
 - Fail fast when the selected chat command does not expose the requested llama.cpp flag. After a supported config edit, upstream `502`, exit `250`, or CUDA OOM usually means a fit boundary.
+
+## Bonsai Profile Constraints
+
+- Preserve the full 262,144-token window, including prompt and generated output. All three Bonsai templates use `--parallel 1`, `--kv-unified`, and `concurrencyLimit: 16`: admitted chat requests queue for one slot while embeddings and reranking remain concurrent.
+- The default uses PTQ1_0 target weights, a snapshot-pinned Q8_0 DFlash2 drafter with up to seven draft tokens, Q8 K/V, and Flash Attention. The Prism source pin is `88c4bc60b9c9578f134385be9535e853f2db9b9f`; it includes the September 29 CUDA integration checkpoint.
+- Copy `config/config.bonsai-dflash2.yml.example` for cutoff/cache trials. `bonsai_spec_depth_max: 0` leaves speculation unlimited; a positive cutoff stops drafting at that sequence depth without reducing context. `bonsai_kv_type` selects both K and V precision. Keep the Q8/unlimited defaults unless new measurements justify changing them.
+- The October 2 UTC RTX 5090 matrix compared Q8/Q4 with unlimited, 24K, 32K, and 48K cutoffs through 64K prompt depth. Q8/unlimited performed best overall. Both cache types passed a 261,888-token retrieval, but sustained decode beyond 64K and broad cache-quality equivalence remain unmeasured. See [Bonsai profiles](../../../README.md#bonsai-profiles) for results and limits.
+- For a systemd-owned deployment, stop Hindsight's API and database units before a disruptive trial, then stop the EasyLlama supervisor before changing its stack. Stopping containers alone can trigger automatic restarts. Restore EasyLlama, warm all three routes, then restore Hindsight's database and API units.
+- Preserve search-model residency during co-resident measurements. Stopping the proxy unloads the native search backends; running containers alone do not prove loaded models. Warm chat, embeddings, and reranking, and verify native health before timing. The Bonsai embedder retains 1,024 dimensions and a unified 32,768-token pool across four native slots; reranking has two slots.
 
 ## Procedure
 
@@ -52,7 +61,7 @@ Tune the first llama.cpp-backed chat alias in a chosen easyllama mode until the 
    - Stop running easyllama containers before restart; use the `common.sh` helper through the tuning scripts, not manually.
    - Validate YAML.
    - Restart the mode.
-   - Warm only the discovered chat alias with `./run.sh --mode <mode> warmup <chat-alias>`.
+   - Warm the discovered chat alias with `./run.sh --mode <mode> warmup <chat-alias>`. For Bonsai co-resident trials, also warm `qwen3-embeddings` and `qwen3-reranker` before measuring.
    - If warmup fails with upstream `502` or `exit status 250`, treat it as a fit or startup OOM signal unless logs show another root cause.
    - Otherwise inspect logs to distinguish fit failure from transient or config parsing issues.
    - If warmup succeeds, inspect aggregated mode logs to confirm startup; use [probe-chat.sh](./scripts/probe-chat.sh) to combine validation, restart, warmup, and log checking.
@@ -73,12 +82,12 @@ Tune the first llama.cpp-backed chat alias in a chosen easyllama mode until the 
 - `./run.sh --mode <mode> restart && ./run.sh --mode <mode> warmup <chat-alias>` succeeds.
 - Aggregated `./run.sh --mode <mode> logs --tail N` output shows the intended mode-specific server args, context, layer count, and cache types.
 - If the tuned setting is meant to become the repo default, `config/config.<mode>.yml.example` is synced and validates.
-- If KV cache precision changed, the user has either accepted the heuristic choice (`q5_1` before `q5_0`) or compared deterministic sample outputs.
+- If KV cache precision changed, the user has either accepted the profile-specific heuristic choice or compared deterministic sample outputs. Bonsai Q4 changed greedy code output in the recorded matrix, so speed and fit alone do not establish equivalent quality.
 
 ## Scripts
 
 - [list-supported-cache-types.sh](./scripts/list-supported-cache-types.sh): show KV cache types accepted by the current server binary.
-- [set-chat-tuning.sh](./scripts/set-chat-tuning.sh): update qwen3-chat ctx size, gpu layers, fit mode, and KV cache types in a mode config.
+- [set-chat-tuning.sh](./scripts/set-chat-tuning.sh): update the first chat alias's ctx size, GPU layers, fit mode, and KV cache types in a mode config.
 - [probe-chat.sh](./scripts/probe-chat.sh): validate config, stop the selected stack, restart it with dependencies and network, warm the first chat alias under `models:`, and print live args on success.
 - [search-max-gpu-layers.sh](./scripts/search-max-gpu-layers.sh): binary-search the highest passing layer count between known good and known failing bounds for a selected mode.
 - [snapshot-chat-sample.sh](./scripts/snapshot-chat-sample.sh): save a deterministic chat completion response for before-and-after cache-quant comparisons.

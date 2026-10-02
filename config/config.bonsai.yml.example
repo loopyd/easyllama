@@ -1,6 +1,9 @@
-# DFlash2 at four slots is the selected default. Six-slot mixed traffic passed
-# with 171 MiB free; four slots passed with about 2.7 GiB free after mixed traffic.
-# Keep the plain profile for prose and the three-slot variant for more headroom.
+# DFlash2 uses one chat slot so each request can use the full context.
+# Admitted chat requests wait in llama.cpp's queue. Multiple active slots
+# exhausted the shared KV pool even when each request was below 262144 tokens.
+# The 262144-token model window includes the prompt, thinking, and answer.
+# Keep Q8 K/V and DFlash2 at up to seven draft tokens with no depth cutoff.
+# RTX 5090 timing comparisons through 64K favored unlimited speculation.
 # Bonsai mode: all three models GPU-resident at the same time.
 #
 # Ternary Bonsai 2 27B (PTQ1_0) is ~5.9 GB of weights on a card with 32,607 MiB,
@@ -65,12 +68,12 @@ models:
   bonsai-chat:
     port: 9600
     lifecyclePort: 9608
-    # 0 disables llama-swap's early admission rejection so a request waits
-    # through a model switch instead of returning 429.
+    # Admit up to 16 outstanding chat requests; excess requests get HTTP 429.
+    # llama.cpp executes admitted requests serially behind its one chat slot.
     concurrencyLimit: 16
     name: Ternary Bonsai 2 27B PTQ1_0 DFlash2 Q8_0
     description: Primary thinking/tool-use model; PTQ1_0 Bonsai 2 27B with Q8_0 DFlash2 at depth seven on the PrismML fork, co-resident with the GPU search models
-    # Four slots share one 262144-token context pool through --kv-unified.
+    # One slot owns the full 262144-token context pool through --kv-unified.
     # The drafter and the GPU search models remain co-resident.
     cmd: '${server_bin}
       server
@@ -88,7 +91,7 @@ models:
       --device CUDA0
       --fit off
       -c 262144
-      --parallel 4
+      --parallel 1
       --kv-unified
       --batch-size 2048
       --ubatch-size 512

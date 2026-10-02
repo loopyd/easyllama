@@ -11,6 +11,8 @@ Project goal: one host command surface, one public port, one shared model cache,
   - [At a glance](#at-a-glance)
   - [Modes](#modes)
     - [Docker networking](#docker-networking)
+    - [Bonsai profiles](#bonsai-profiles)
+    - [Qwen profile](#qwen-profile)
   - [System requirements](#system-requirements)
   - [Install](#install)
   - [Quick start](#quick-start)
@@ -32,7 +34,8 @@ Project goal: one host command surface, one public port, one shared model cache,
 - Shared model downloads under `cache/`
 - Stable model names from `/v1/models`
 - Qwen mode keeps GPU embeddings and compact reranking resident together, swapping them for large chat
-- Other profiles share the GPU through exclusive model swapping
+- Bonsai mode keeps chat, its DFlash2 drafter, embeddings, and reranking resident, with one queued chat slot
+- The other profiles share the GPU through exclusive model swapping
 - Use warmup to avoid a slow first request
 
 ## Modes
@@ -47,7 +50,7 @@ reserves two consecutive ports (its API port plus a backend slot at +1 for
 multi-socket backends such as FreeToken's torch.distributed store), lifecycle
 listeners follow the reserved band, and each profile declares a distinct
 `startPort` base (Qwen 9000, GLM-5.3 Flash 9100, llama.cpp 9200, TurboQuant 9300,
-SpiritBuun 9400, Lucebox 9500) so co-resident models from another profile cannot
+SpiritBuun 9400, Lucebox 9500, Bonsai 9600) so co-resident models from another profile cannot
 collide. These host ports must be free; do not run multiple profiles
 concurrently. Host mode runs the existing
 llama-swap binary directly under Docker's init process and needs no image rebuild.
@@ -78,69 +81,116 @@ Choose a mode by backend behavior; the setup flow is the same for all seven mode
 
 The `glm5.3-flash` mode runs the FreeToken runtime, not llama.cpp: FreeToken is installed from the pinned `FlashML-org/FreeToken` repository into an isolated venv (`/opt/ft-venv`) inside the dedicated `freetoken` image role, and the runtime stage merges the CUDA 13 compiler (nvcc) because FreeToken JIT-compiles its kernels on first use. GLM-5.3 Flash is a 320B-total / 18B-active MoE with hybrid linear (KDA) plus sparse (DSA) attention; only the eleven DSA layers grow KV, so the full 262,144-token context costs about 2.8 GiB of KV (bf16) and the profile pins it at `--max-seq-len-override`, `--num-tokens` and `--kv-reserve-tokens`. NVFP4 routed experts live off-VRAM: FreeToken keeps an LRU expert cache in host RAM and streams misses from the checkpoint on the host SSD (`cache/models`, ~160 GiB download on first start). The mode exposes `glm53-chat` and the 30-minute idle timer keeps the model warm.
 
-The `bonsai` mode serves Ternary Bonsai 2 27B (`prism-ml/Ternary-Bonsai-2-27B-gguf`, `PTQ1_0`, ~5.9 GB, derived from Qwen3.8-27B) with a ProCreations Q8_0 DFlash2 drafter at depth seven on the pinned `PrismML-Eng/llama.cpp` `prism` build, shipped as `/app/bin/llama-server-bonsai`. That fork is required: the ternary g128 kernels live there, and a stock llama.cpp build rejects both the `PTQ1_0` and `PQ2_0` tensor types. The mode is built for co-residency instead of swapping. The chat model, the Qwen3-Embedding-0.6B embedder and the BGE reranker stay GPU-resident at the same time in one non-swapping group (`swap: false`, `exclusive: false`), so no member can evict another and llama-swap remains the only lifecycle owner. Chat serves `bonsai-chat` at the model's full 262,144-token context, shared unified across four slots with q8_0 KV, and keeps reasoning on: it uses the Qwen3.8 template (`/chat_template/qwen3.8.jinja`) so reasoning levels (`low`/`medium`/`xhigh`) are honoured per request, with `--reasoning-preserve` to keep the thinking trace in history and `--reasoning-format deepseek` to keep it out of `content`. Because an unset level defaults to `xhigh`, a server-wide `--reasoning-budget` bounds the thinking; without that bound a long retain prompt can spend the entire output allowance thinking and emit no content at all, which is what made Hindsight's extraction unserialisable. The embedder keeps the `qwen3-embeddings` identity at 1,024 dimensions, and `qwen3-reranker` serves `POST /v1/rerank` on two native slots. Earlier plain PQ2_0 measurements on an RTX 5090: the three-model steady state at full context held ~22.9 GiB of the 32,607 MiB card (about 9.1 GiB free) and decoded at 126-134 tok/s on short prompts. The selected DFlash2 profile uses four slots; its current checks are described below.
+### Bonsai profiles
 
-Co-residency is the reason the mode exists. A Hindsight retain needs the chat model and the embedder in the same window, and the qwen profile's mutually exclusive swap groups made that impossible: measured over a 40-minute window, `/v1/embeddings` succeeded zero times and the retain queue completed 0-1 operations per 30 minutes against a backlog of ~28k. With one GPU-resident group, both are resident, so the queue drains. `config/config.bonsai.yml.example` documents the group, the port band (`startPort: 9600`) and the pinned model artifacts.
+The `bonsai` mode serves Ternary Bonsai 2 27B PTQ1_0, about 5.9 GB of weights,
+with a revision-pinned ProCreations Q8_0 DFlash2 drafter at depth seven.
+The binary is `/app/bin/llama-server-bonsai` from the PrismML fork.
+Its ternary kernels support the `PTQ1_0` and `PQ2_0` tensor types used by these profiles.
 
-The default `config/config.bonsai.yml.example` selects PTQ1_0 and DFlash2 with four
-slots. All public endpoints, repeated required tool calls, and concurrent chat,
-embedding, and rerank requests passed with about 2.7 GiB free on the RTX 5090.
-The optional `config/config.bonsai-dflash2.yml.example` uses three slots
-with the same model IDs, ports, full context, Q8 KV, reasoning budget, and
-non-swapping search group. Its six-slot trial left only
-171 MiB free after mixed chat and search requests on the RTX 5090. Three slots
-passed the same checks with about 4.2 GiB free. Both profiles select a
-revision-pinned PTQ1_0 target and the
-[ProCreations Q8_0 DFlash2 drafter](https://huggingface.co/ProCreations/Ternary-Bonsai-2-27B-DFlash2),
-with `--spec-draft-n-max 7`. Host warmup downloads both pinned files before
-starting the backend. The Bonsai build defaults to Prism commit
-`88c4bc60b9c9578f134385be9535e853f2db9b9f`, which includes the
-[DFlash2 merge](https://github.com/PrismML-Eng/llama.cpp/pull/261).
-The builder accepts commit hashes, tags, and branches. Existing ignored JSON
-configs retain their own source pin, so use the explicit override below.
+Chat, the drafter, Qwen3-Embedding-0.6B, and the BGE reranker remain GPU-resident.
+The three API routes share one non-swapping group with `swap: false` and
+`exclusive: false`. llama-swap owns their lifecycle.
+Chat uses `--parallel 1`, `--kv-unified`, and `concurrencyLimit: 16`.
+One admitted chat request executes while the others wait in the backend queue;
+requests above the admission limit receive HTTP 429. Embeddings and reranking
+remain concurrent. Multiple active chat slots previously exhausted the shared KV pool
+even when each request was below the model's context limit.
 
-A local September 30, 2026 check used this revision, Q8 KV, a shared 262,144-token
-context, six slots with one active request, greedy decoding with thinking off,
-and two 256-token samples per prompt. Mean decode rates in tokens per second:
+Every Bonsai profile preserves the model's full **262,144-token context window**.
+This window covers the formatted prompt, generated reasoning, and the answer together.
+The 64K depth used in the throughput comparison below does not change that window.
+The default uses Flash Attention and Q8 K/V, with unlimited DFlash2 speculation.
+The embedder keeps its 1,024-dimensional identity and a 32,768-token unified pool
+across four native slots. The reranker has two native slots.
 
-| Target and speculation | Code | Math | Prose | Code edit |
-| --- | ---: | ---: | ---: | ---: |
-| PQ2_0, plain | 116 | 116 | 117 | 118 |
-| PTQ1_0, plain | 127 | 124 | 125 | 126 |
-| PTQ1_0, DFlash2 Q8_0 | 233 | 207 | 107 | 285 |
+Chat keeps reasoning enabled through `/chat_template/qwen3.8.jinja`.
+Requests select `low`, `medium`, or `xhigh` effort; `high` aliases `xhigh`.
+An unset effort defaults to `xhigh`, bounded by `--reasoning-budget 1024`.
+`--reasoning-preserve` retains thinking in history, and `--reasoning-format deepseek`
+returns it separately from answer content. Reserve enough output tokens for both.
 
-These are short decode samples, not capability scores or long-prompt throughput.
-Stopping the proxy unloads the search backends, so this timing comparison does
-not establish throughput under concurrent search traffic. In the separate
-full-stack check, all three models were loaded and mixed chat, embedding, and
-rerank requests passed. Prompt lookup accelerated the repeated code-edit sample
-from 286 to 402 tok/s as its cache warmed. Repeated math and prose also benefited
-from cached output, so their warm-cache rates do not represent new prompts.
-The plain PQ2_0 profile remains available in `config/config.bonsai-plain.yml.example`.
-It preserves the original six slots and is useful for prose comparisons.
+Co-residency is the reason the mode exists. In an earlier 40-minute Hindsight run,
+Qwen's mutually exclusive groups yielded zero successful `/v1/embeddings` requests
+while retain extraction held chat; the queue completed 0-1 operations per 30 minutes.
+Bonsai keeps both models available for that workflow. This removes the swapping
+conflict but does not establish that the historical ingestion backlog can drain.
+`config/config.bonsai.yml.example` documents the group, the port band
+(`startPort: 9600`), and the pinned model artifacts.
 
-To try the three-slot variant, build it under a separate image name, then
-restart the Bonsai stack. This replaces the running Bonsai stack during the trial.
-If `easyllama.service` owns the stack, stop that user service before a manual
-restart and start it again after restoring the default profile.
+The shipped profiles use the same API IDs, ports, one queued chat slot, and full context:
+
+| Template | Chat configuration |
+| --- | --- |
+| `config/config.bonsai.yml.example` | Default PTQ1_0 target and Q8_0 DFlash2 drafter, Q8 K/V, draft depth seven, no speculative-depth cutoff |
+| `config/config.bonsai-dflash2.yml.example` | Same default, with `bonsai_spec_depth_max` and `bonsai_kv_type` macros for trials |
+| `config/config.bonsai-plain.yml.example` | Plain PQ2_0 rollback, Q8 K/V, no draft model |
+
+The target and [ProCreations Q8_0 DFlash2 drafter](https://huggingface.co/ProCreations/Ternary-Bonsai-2-27B-DFlash2)
+use pinned Hugging Face snapshots. Host warmup downloads both before starting chat.
+The build defaults to Prism commit `88c4bc60b9c9578f134385be9535e853f2db9b9f`.
+It includes the [DFlash2 merge](https://github.com/PrismML-Eng/llama.cpp/pull/261)
+and the [September 29 CUDA integration checkpoint](https://github.com/PrismML-Eng/llama.cpp/compare/5244cea...88c4bc6).
+The builder accepts commit hashes, tags, and branches. An existing local JSON config
+can retain a different pin; use `EASYLLAMA_LLAMA_CPP_REF` to select this revision explicitly.
+
+The October 2, 2026 UTC RTX 5090 trial compared Q8 and Q4 K/V with cutoffs of
+0, 24K, 32K, and 48K. Search backends were explicitly loaded and verified healthy
+throughout, but idle during timing. Hindsight services were stopped for the trial.
+Mean native decode rates at a 65,536-token prompt depth, in tokens per second:
+
+| K/V cache | Speculative-depth cutoff | Code | Math | Prose |
+| --- | --- | ---: | ---: | ---: |
+| Q8 | Unlimited | 195.2 | 192.4 | 102.0 |
+| Q8 | 24,576 | 91.7 | 91.7 | 90.9 |
+| Q8 | 32,768 | 92.1 | 92.3 | 92.3 |
+| Q8 | 49,152 | 91.3 | 91.3 | 91.7 |
+| Q4 | Unlimited | 206.6 | 181.3 | 92.1 |
+| Q4 | 24,576 | 84.9 | 85.1 | 85.1 |
+| Q4 | 32,768 | 83.6 | 83.8 | 83.5 |
+| Q4 | 49,152 | 83.9 | 84.7 | 84.5 |
+
+Each cell averages two 256-token greedy samples with thinking disabled:
+one with a cold prompt cache and one with a cached prompt.
+Code was timed at 4K, 24K, 32K, 48K, and 64K; math and prose were timed at 64K.
+The default remains Q8 K/V and unlimited speculation. Q4 changed greedy output,
+increased code throughput, and reduced math and prose throughput in these samples.
+These timing samples do not establish model accuracy or a cutoff beyond 64K.
+
+All 154 inference requests completed, including 24 queued-chat checks, eight tool-argument
+checks, and eight exact retrieval checks at 64K, with no recorded CUDA failures.
+Both cache types also retrieved the correct value from a 261,888-token prompt.
+After those near-full-context requests, Q8 left 6,773 MiB free and Q4 left 10,778 MiB free.
+Cold prompt processing measured 1,329 and 1,440 tokens per second, respectively.
+Those two requests establish retrieval and fit near the window limit, not sustained
+generation throughput there. The restored production stack passed a separate
+simultaneous chat, embedding, and reranking check.
+
+To trial the configurable profile, copy it to an ignored `.yml` file and edit its macros.
+`bonsai_spec_depth_max: 0` keeps drafting at every depth; positive values stop drafting
+once the sequence exceeds that depth. The cutoff does not reduce the context window.
+`bonsai_kv_type` selects `q8_0` or `q4_0` for both K and V.
+Restart the backend after each variant. For code-edit trials, set `bonsai_spec_type`
+to `ngram-mod,draft-dflash` in that copy.
+
+If user services own the deployment, stop Hindsight before stopping `easyllama.service`
+for a manual trial. Stopping containers alone can trigger their supervisors to restart them.
+Restore EasyLlama and warm all three routes before starting Hindsight again.
+Stopping the proxy unloads the search backends, so warm all three routes before
+measuring co-resident fit or throughput.
+
+Build the trial under a separate image name to preserve the production image:
 
 ```bash
-export EASYLLAMA_IMAGE_NAME=easyllama-dflash2
+cp config/config.bonsai-dflash2.yml.example config/config.bonsai-depth.yml
+# Edit the trial macros in config/config.bonsai-depth.yml before restarting.
+export EASYLLAMA_IMAGE_NAME=easyllama-bonsai-trial
 export EASYLLAMA_LLAMA_CPP_REF=88c4bc60b9c9578f134385be9535e853f2db9b9f
-export EASYLLAMA_LS_CONFIG_FILE="$PWD/config/config.bonsai-dflash2.yml.example"
+export EASYLLAMA_LS_CONFIG_FILE="$PWD/config/config.bonsai-depth.yml"
 ./run.sh --mode bonsai build
 ./run.sh --mode bonsai restart
 ./run.sh --mode bonsai warmup bonsai-chat qwen3-embeddings qwen3-reranker
 ```
-
-For code-edit loops, copy the experimental template to an ignored `.yml` file,
-set its `bonsai_spec_type` macro to `ngram-mod,draft-dflash`, and point
-`EASYLLAMA_LS_CONFIG_FILE` to that file. Compare code, math, prose, prompt
-processing, and concurrent requests before promoting either speculative profile.
-The [Prism RTX 5090 review](https://github.com/PrismML-Eng/llama.cpp/pull/261)
-reports workload-dependent gains and CUDA greedy-output differences. Those
-measurements do not establish performance under this profile's full-context
-concurrent traffic. Preserve the existing Q8 KV configuration during the comparison.
 
 To select the plain PQ2_0 profile persistently while keeping the current Prism
 build, copy its template into the active profile. Preserve any local overrides
@@ -153,8 +203,10 @@ cp config/config.bonsai-plain.yml.example config/config.bonsai.yml
 ./run.sh --mode bonsai warmup bonsai-chat qwen3-embeddings qwen3-reranker
 ```
 
-To return to the four-slot DFlash2 default, merge or copy
+To return to the one-slot DFlash2 default, merge or copy
 `config/config.bonsai.yml.example` into `config/config.bonsai.yml` and restart.
+
+### Qwen profile
 
 The `qwen` mode uses llama.cpp for chat and embeddings. Chat runs the multilingual RVN Heretic Q4_K_M model text-only at 262,144 tokens with full GPU placement, Q8_0 KV, Flash Attention, native RAM-backed prompt caching, and its embedded MTP head at draft depth two. vLLM, LMCache, and chat CPU weight offload are disabled. The Qwen3.8 template preserves reasoning and accepts `low`, `medium`, and `xhigh` reasoning effort (`high` aliases `xhigh`); clients with additional level names must map them first. This profile sets llama-swap's global idle timer to 30 minutes; other profiles retain the disabled default.
 
@@ -335,6 +387,8 @@ with `--wipe-cache [list]` when a cache is corrupt or you want a cold-cache test
 | `config/config.llamacpp.yml.example` | Tracked `llamacpp` template |
 | `config/config.turboquant.yml.example` | Tracked `turboquant` template |
 | `config/config.bonsai.yml.example` | Tracked `bonsai` template |
+| `config/config.bonsai-dflash2.yml.example` | Configurable Bonsai cutoff and K/V cache trial template |
+| `config/config.bonsai-plain.yml.example` | Plain PQ2_0 Bonsai rollback template |
 | `config/config.spiritbuun.yml.example` | Tracked `spiritbuun` template |
 | `config/config.qwen.yml.example` | Tracked `qwen` template |
 | `config/config.lucebox.yml.example` | Tracked `lucebox` template |
