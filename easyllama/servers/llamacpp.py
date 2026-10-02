@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 from ..helpers.model import Model
@@ -129,4 +130,6 @@ class LlamaCppServer(ServerBase):
 
         Returns:
             int: The run result."""
+        if os.environ.get("EASYLLAMA_LIFECYCLE_MANAGED") == "1":
+            os.execvpe(spec.cmd[0], spec.cmd, {**os.environ, **spec.env})
         return self.run_proc(spec.cmd, env=spec.env)

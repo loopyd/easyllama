@@ -126,6 +126,7 @@ class Backend:
     ) -> None:
         self.command = command
         self.proc: subprocess.Popen[bytes] | None = None
+        self.stopping = False
         self.lock = Lock()
         self.changed = Condition(self.lock)
         self.sleep_mode = sleep_mode
@@ -164,29 +165,15 @@ class Backend:
                     message=f"wake_up of pid={proc.pid} did not finish in time",
                 )
                 return proc.pid
-            if proc is not None and proc.poll() is None:
-                LOGGER.warning(
-                    "wake: previous backend pid=%s still terminating; waiting for exit",
-                    proc.pid,
-                )
-                settled = self.changed.wait_for(
-                    lambda: self.proc is None or self.proc.poll() is not None,
-                    timeout=45,
-                )
+            if self.stopping:
+                settled = self.changed.wait_for(lambda: not self.stopping, timeout=45)
                 if not settled:
-                    current = self.proc
-                    if current is not None and current is proc and current.poll() is None:
-                        LOGGER.error("wake: pid=%s stuck; escalating to SIGKILL", proc.pid)
-                        with suppress(ProcessLookupError):
-                            os.killpg(proc.pid, signal.SIGKILL)
-                        proc.wait()
+                    raise RuntimeError("backend shutdown did not complete before wake")
             current = self.proc
             if current is None or current.poll() is not None:
-                # No backend, or the previous incarnation died (crash, OOM,
-                # or a completed sleep): start a fresh one. A live Popen here
-                # can only be a still-terminating process from a racing sleep.
                 LOGGER.info("waking model backend")
-                current = subprocess.Popen(self.command, start_new_session=True)
+                env = {**os.environ, "EASYLLAMA_LIFECYCLE_MANAGED": "1"}
+                current = subprocess.Popen(self.command, env=env, start_new_session=True)
                 self.proc = current
                 self.changed.notify_all()
                 if self.sleep_mode == "slot":
@@ -201,6 +188,7 @@ class Backend:
         http:    keep the process alive; offload weights to host RAM.
         """
         with self.changed:
+            self.changed.wait_for(lambda: not self.stopping)
             proc = self.proc
             if proc is None or proc.poll() is not None:
                 self.proc = None
@@ -219,19 +207,24 @@ class Backend:
                 return
             if self.sleep_mode == "slot":
                 self._save_slots()
+            self.stopping = True
+            self.changed.notify_all()
             LOGGER.info("sleeping model backend pid=%s", proc.pid)
+        try:
             with suppress(ProcessLookupError):
                 os.killpg(proc.pid, signal.SIGTERM)
-        try:
-            proc.wait(timeout=30)
-        except subprocess.TimeoutExpired:
-            with suppress(ProcessLookupError):
-                os.killpg(proc.pid, signal.SIGKILL)
-            proc.wait()
-        with self.changed:
-            if self.proc is proc:
-                self.proc = None
-            self.changed.notify_all()
+            try:
+                proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                with suppress(ProcessLookupError):
+                    os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait()
+        finally:
+            with self.changed:
+                if self.proc is proc and proc.poll() is not None:
+                    self.proc = None
+                self.stopping = False
+                self.changed.notify_all()
 
     def wait(self, pid: int) -> int:
         """Wait for the selected backend incarnation to exit."""
