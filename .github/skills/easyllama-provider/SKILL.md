@@ -26,9 +26,9 @@ Create or update a provider mode for this repository without reintroducing hardc
 
 ## Bonsai Profile Contract
 
-When changing Bonsai, keep the default, experimental DFlash2, and plain PQ2_0 rollback templates consistent with the [Bonsai profile documentation](../../../README.md#bonsai-profiles). All three preserve the full 262,144-token prompt-plus-output window and one queued native chat slot (`--parallel 1`, `--kv-unified`, `concurrencyLimit: 16`). Embeddings and reranking remain resident and concurrent with chat.
+When changing Bonsai, keep its single shipped template, `config/config.bonsai.yml.example`, consistent with the [Bonsai profile documentation](../../../README.md#bonsai-profile). It preserves the full 262,144-token prompt-plus-output window and one queued native chat slot (`--parallel 1`, `--kv-unified`, `concurrencyLimit: 16`). Embeddings and reranking remain resident and concurrent with chat.
 
-The default target is PTQ1_0 with a snapshot-pinned ProCreations Q8_0 DFlash2 drafter, up to seven draft tokens, Q8 K/V, Flash Attention, and unlimited speculation. The Prism build pin is `88c4bc60b9c9578f134385be9535e853f2db9b9f`, including the September 29 CUDA integration checkpoint. The experimental template exposes cache precision and a speculative-depth cutoff; that cutoff changes drafting, not the supported context window.
+The target is PTQ1_0 with a snapshot-pinned ProCreations Q8_0 DFlash2 drafter, up to seven draft tokens, Q8 K/V, Flash Attention, and unlimited speculation. The Prism build pin is `88c4bc60b9c9578f134385be9535e853f2db9b9f`, including the September 29 CUDA integration checkpoint. Keep experiments in ignored local copies rather than adding alternate shipped profiles.
 
 For live co-resident validation, warm all three routes and verify native backend health. A running auxiliary container does not prove its model is loaded after the proxy has stopped. Preserve the embedder's 1,024 dimensions and unified 32,768-token pool across four slots, plus the reranker's two slots. Report timing coverage separately from full-window fit/retrieval and broad quality claims.
 

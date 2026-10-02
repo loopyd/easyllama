@@ -11,7 +11,7 @@ Project goal: one host command surface, one public port, one shared model cache,
   - [At a glance](#at-a-glance)
   - [Modes](#modes)
     - [Docker networking](#docker-networking)
-    - [Bonsai profiles](#bonsai-profiles)
+    - [Bonsai profile](#bonsai-profile)
     - [Qwen profile](#qwen-profile)
   - [System requirements](#system-requirements)
   - [Install](#install)
@@ -81,12 +81,12 @@ Choose a mode by backend behavior; the setup flow is the same for all seven mode
 
 The `glm5.3-flash` mode runs the FreeToken runtime, not llama.cpp: FreeToken is installed from the pinned `FlashML-org/FreeToken` repository into an isolated venv (`/opt/ft-venv`) inside the dedicated `freetoken` image role, and the runtime stage merges the CUDA 13 compiler (nvcc) because FreeToken JIT-compiles its kernels on first use. GLM-5.3 Flash is a 320B-total / 18B-active MoE with hybrid linear (KDA) plus sparse (DSA) attention; only the eleven DSA layers grow KV, so the full 262,144-token context costs about 2.8 GiB of KV (bf16) and the profile pins it at `--max-seq-len-override`, `--num-tokens` and `--kv-reserve-tokens`. NVFP4 routed experts live off-VRAM: FreeToken keeps an LRU expert cache in host RAM and streams misses from the checkpoint on the host SSD (`cache/models`, ~160 GiB download on first start). The mode exposes `glm53-chat` and the 30-minute idle timer keeps the model warm.
 
-### Bonsai profiles
+### Bonsai profile
 
 The `bonsai` mode serves Ternary Bonsai 2 27B PTQ1_0, about 5.9 GB of weights,
 with a revision-pinned ProCreations Q8_0 DFlash2 drafter at depth seven.
 The binary is `/app/bin/llama-server-bonsai` from the PrismML fork.
-Its ternary kernels support the `PTQ1_0` and `PQ2_0` tensor types used by these profiles.
+Its ternary kernels support the profile's `PTQ1_0` target weights.
 
 Chat, the drafter, Qwen3-Embedding-0.6B, and the BGE reranker remain GPU-resident.
 The three API routes share one non-swapping group with `swap: false` and
@@ -97,7 +97,7 @@ requests above the admission limit receive HTTP 429. Embeddings and reranking
 remain concurrent. Multiple active chat slots previously exhausted the shared KV pool
 even when each request was below the model's context limit.
 
-Every Bonsai profile preserves the model's full **262,144-token context window**.
+The Bonsai profile preserves the model's full **262,144-token context window**.
 This window covers the formatted prompt, generated reasoning, and the answer together.
 The 64K depth used in the throughput comparison below does not change that window.
 The default uses Flash Attention and Q8 K/V, with unlimited DFlash2 speculation.
@@ -118,13 +118,10 @@ conflict but does not establish that the historical ingestion backlog can drain.
 `config/config.bonsai.yml.example` documents the group, the port band
 (`startPort: 9600`), and the pinned model artifacts.
 
-The shipped profiles use the same API IDs, ports, one queued chat slot, and full context:
-
-| Template | Chat configuration |
-| --- | --- |
-| `config/config.bonsai.yml.example` | Default PTQ1_0 target and Q8_0 DFlash2 drafter, Q8 K/V, draft depth seven, no speculative-depth cutoff |
-| `config/config.bonsai-dflash2.yml.example` | Same default, with `bonsai_spec_depth_max` and `bonsai_kv_type` macros for trials |
-| `config/config.bonsai-plain.yml.example` | Plain PQ2_0 rollback, Q8 K/V, no draft model |
+The repository ships one Bonsai profile, `config/config.bonsai.yml.example`.
+Its editable local copy is `config/config.bonsai.yml`; these are the template and
+active copy of the same profile. PTQ1_0 with Q8_0 DFlash2, Q8 K/V, and unlimited
+speculation is the recommended configuration based on the measured workloads below.
 
 The target and [ProCreations Q8_0 DFlash2 drafter](https://huggingface.co/ProCreations/Ternary-Bonsai-2-27B-DFlash2)
 use pinned Hugging Face snapshots. Host warmup downloads both before starting chat.
@@ -166,45 +163,23 @@ Those two requests establish retrieval and fit near the window limit, not sustai
 generation throughput there. The restored production stack passed a separate
 simultaneous chat, embedding, and reranking check.
 
-To trial the configurable profile, copy it to an ignored `.yml` file and edit its macros.
-`bonsai_spec_depth_max: 0` keeps drafting at every depth; positive values stop drafting
-once the sequence exceeds that depth. The cutoff does not reduce the context window.
-`bonsai_kv_type` selects `q8_0` or `q4_0` for both K and V.
-Restart the backend after each variant. For code-edit trials, set `bonsai_spec_type`
-to `ngram-mod,draft-dflash` in that copy.
-
 If user services own the deployment, stop Hindsight before stopping `easyllama.service`
-for a manual trial. Stopping containers alone can trigger their supervisors to restart them.
+for a manual profile change. Stopping containers alone can trigger their supervisors to restart them.
 Restore EasyLlama and warm all three routes before starting Hindsight again.
 Stopping the proxy unloads the search backends, so warm all three routes before
 measuring co-resident fit or throughput.
 
-Build the trial under a separate image name to preserve the production image:
+For a fresh Bonsai setup, copy the single template and start the mode.
+For an existing setup, merge template updates into the active file to preserve local overrides.
+Remove any obsolete trial-profile environment overrides before selecting the default:
 
 ```bash
-cp config/config.bonsai-dflash2.yml.example config/config.bonsai-depth.yml
-# Edit the trial macros in config/config.bonsai-depth.yml before restarting.
-export EASYLLAMA_IMAGE_NAME=easyllama-bonsai-trial
-export EASYLLAMA_LLAMA_CPP_REF=88c4bc60b9c9578f134385be9535e853f2db9b9f
-export EASYLLAMA_LS_CONFIG_FILE="$PWD/config/config.bonsai-depth.yml"
+unset EASYLLAMA_IMAGE_NAME EASYLLAMA_LLAMA_CPP_REF EASYLLAMA_LS_CONFIG_FILE
+cp config/config.bonsai.yml.example config/config.bonsai.yml
 ./run.sh --mode bonsai build
 ./run.sh --mode bonsai restart
 ./run.sh --mode bonsai warmup bonsai-chat qwen3-embeddings qwen3-reranker
 ```
-
-To select the plain PQ2_0 profile persistently while keeping the current Prism
-build, copy its template into the active profile. Preserve any local overrides
-when merging the template. Stop the lifecycle service first if it owns the stack.
-
-```bash
-unset EASYLLAMA_IMAGE_NAME EASYLLAMA_LLAMA_CPP_REF EASYLLAMA_LS_CONFIG_FILE
-cp config/config.bonsai-plain.yml.example config/config.bonsai.yml
-./run.sh --mode bonsai restart
-./run.sh --mode bonsai warmup bonsai-chat qwen3-embeddings qwen3-reranker
-```
-
-To return to the one-slot DFlash2 default, merge or copy
-`config/config.bonsai.yml.example` into `config/config.bonsai.yml` and restart.
 
 ### Qwen profile
 
@@ -387,8 +362,6 @@ with `--wipe-cache [list]` when a cache is corrupt or you want a cold-cache test
 | `config/config.llamacpp.yml.example` | Tracked `llamacpp` template |
 | `config/config.turboquant.yml.example` | Tracked `turboquant` template |
 | `config/config.bonsai.yml.example` | Tracked `bonsai` template |
-| `config/config.bonsai-dflash2.yml.example` | Configurable Bonsai cutoff and K/V cache trial template |
-| `config/config.bonsai-plain.yml.example` | Plain PQ2_0 Bonsai rollback template |
 | `config/config.spiritbuun.yml.example` | Tracked `spiritbuun` template |
 | `config/config.qwen.yml.example` | Tracked `qwen` template |
 | `config/config.lucebox.yml.example` | Tracked `lucebox` template |
